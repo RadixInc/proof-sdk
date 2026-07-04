@@ -6,7 +6,13 @@ function createExplicitBlankParagraphPlaceholder(): string {
   return `PROOF_EMPTY_PARAGRAPH_${uuid}`;
 }
 
-const EXPLICIT_BLANK_PARAGRAPH_PLACEHOLDER = createExplicitBlankParagraphPlaceholder();
+// Lazy: computed on first use, not at import time — the Workers runtime
+// disallows generating random values in module scope.
+let explicitBlankParagraphPlaceholder: string | null = null;
+function getExplicitBlankParagraphPlaceholder(): string {
+  explicitBlankParagraphPlaceholder ??= createExplicitBlankParagraphPlaceholder();
+  return explicitBlankParagraphPlaceholder;
+}
 
 type FencedCodeBlockState = {
   marker: '`' | '~';
@@ -48,7 +54,7 @@ function replaceStandaloneBlankParagraphLines(markdown: string): string {
       return line;
     }
 
-    return /^\s*<br\s*\/?>\s*$/i.test(line) ? EXPLICIT_BLANK_PARAGRAPH_PLACEHOLDER : line;
+    return /^\s*<br\s*\/?>\s*$/i.test(line) ? getExplicitBlankParagraphPlaceholder() : line;
   }).join('\n');
 }
 
@@ -105,7 +111,7 @@ function isPlaceholderParagraph(node: ProseMirrorNode, schema: Schema): boolean 
   return node.type === schema.nodes.paragraph
     && node.childCount === 1
     && node.firstChild?.isText === true
-    && node.textContent === EXPLICIT_BLANK_PARAGRAPH_PLACEHOLDER;
+    && node.textContent === getExplicitBlankParagraphPlaceholder();
 }
 
 export function prepareMarkdownForEditorLoad(markdown: string): string {
@@ -144,5 +150,5 @@ export function parseMarkdownPreservingExplicitBlankParagraphs(options: {
 }
 
 export function __unsafeGetExplicitBlankParagraphPlaceholderForTests(): string {
-  return EXPLICIT_BLANK_PARAGRAPH_PLACEHOLDER;
+  return getExplicitBlankParagraphPlaceholder();
 }

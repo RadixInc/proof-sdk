@@ -18,6 +18,7 @@
     "test": "npm run test:proof-sdk && npm run test:server-routes-share && npm run test:worker-access",
     "test:worker-access": "tsx src/tests/worker-access-identity.test.ts",
     "test:conformance": "tsx src/tests/worker-conformance.test.ts",
+    "test:collab-sync": "tsx src/tests/worker-collab-sync.test.ts",
     "test:proof-sdk": "tsx src/tests/proof-sdk-agent-bridge-client.test.ts",
     "test:server-routes-share": "tsx src/tests/server-routes-and-share.test.ts",
     "demo:agent": "npm --workspace proof-example run demo:agent"
@@ -44,6 +45,7 @@
     "better-sqlite3": "^12.6.2",
     "express": "^5.2.1",
     "jose": "^6.2.3",
+    "partyserver": "^0.5.8",
     "prismjs": "^1.30.0",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",
@@ -53,6 +55,7 @@
     "wink-nlp": "^2.1.0",
     "ws": "^8.19.0",
     "y-indexeddb": "^9.0.12",
+    "y-partyserver": "^2.2.0",
     "y-prosemirror": "^1.2.19",
     "y-websocket": "^3.0.0",
     "yjs": "^13.6.20",

@@ -12,6 +12,7 @@
 
 import { canonicalizeStoredMarks } from '../src/formats/marks';
 import type { Identity } from './access';
+import { resolveCollabSigningSecret, signCollabToken } from './collab-token';
 import type { DocumentDO } from './document-do';
 import { buildProofSdkAgentDescriptor, buildProofSdkLinks } from './sdk-links';
 import {
@@ -33,6 +34,9 @@ export interface ApiEnv {
   PROOF_LEGACY_CREATE_MODE?: string;
   PROOF_SHARE_MARKDOWN_AUTH_MODE?: string;
   PROOF_SHARE_MARKDOWN_API_KEY?: string;
+  PROOF_COLLAB_SIGNING_SECRET?: string;
+  PROOF_DEV_MODE?: string;
+  COLLAB_SESSION_TTL_SECONDS?: string;
 }
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // matches upstream express limits
@@ -500,6 +504,79 @@ async function handleDocRead(request: Request, env: ApiEnv, slug: string): Promi
 }
 
 // ---------------------------------------------------------------------------
+// Collab sessions
+// ---------------------------------------------------------------------------
+
+async function handleCollabSession(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+  identity: Identity,
+): Promise<Response> {
+  const { state, role } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  if (state.shareState !== 'ACTIVE' && role !== 'owner_bot') {
+    return json(
+      { success: false, error: 'Document is not currently accessible' },
+      403,
+    );
+  }
+  if (!role) {
+    return json(
+      {
+        success: false,
+        error: 'Missing or invalid share token',
+        code: 'UNAUTHORIZED',
+        acceptedHeaders: [
+          'x-share-token: <ACCESS_TOKEN>',
+          'x-bridge-token: <OWNER_SECRET>',
+          'Authorization: Bearer <TOKEN>',
+        ],
+      },
+      401,
+    );
+  }
+  const secret = resolveCollabSigningSecret(env);
+  if (!secret) {
+    return json(
+      {
+        success: false,
+        error:
+          'Collab signing secret is not configured (set PROOF_COLLAB_SIGNING_SECRET)',
+        code: 'COLLAB_MISCONFIGURED',
+      },
+      503,
+    );
+  }
+  const ttl = Math.max(60, Number(env.COLLAB_SESSION_TTL_SECONDS ?? '600') || 600);
+  const exp = Math.floor(Date.now() / 1000) + ttl;
+  const sub =
+    identity.kind === 'human' ? identity.email : `agent:${identity.serviceTokenId}`;
+  // Collab connections write through the editor; owner_bot maps to editor.
+  const collabRole = role === 'owner_bot' ? 'editor' : role;
+  const token = await signCollabToken(secret, {
+    slug,
+    role: collabRole,
+    sub,
+    exp,
+    epoch: state.accessEpoch,
+  });
+  const base = getPublicBaseUrl(request, env);
+  const wsBase = base.replace(/^http/, 'ws');
+  return json({
+    success: true,
+    session: {
+      slug,
+      role: collabRole,
+      token,
+      collabWsUrl: `${wsBase}/documents/${slug}/collab`,
+      expiresAt: new Date(exp * 1000).toISOString(),
+      ttlSeconds: ttl,
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -528,6 +605,17 @@ export async function handleApiRequest(
   );
   if (method === 'GET' && stateMatch) {
     return handleState(request, env, stateMatch[1]);
+  }
+
+  const collabSessionMatch = path.match(
+    /^\/(?:api\/)?documents\/([a-z0-9-]+)\/collab-(session|refresh)$/,
+  );
+  if (
+    collabSessionMatch &&
+    ((method === 'GET' && collabSessionMatch[2] === 'session') ||
+      (method === 'POST' && collabSessionMatch[2] === 'refresh'))
+  ) {
+    return handleCollabSession(request, env, collabSessionMatch[1], _identity);
   }
 
   const docMatch = path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)$/);

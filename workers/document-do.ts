@@ -2,11 +2,26 @@
  * DocumentDO — one Durable Object per document slug.
  *
  * The single serialized writer for a document (see the workers-do-per-document
- * ADR). This slice owns canonical content + access tokens in DO SQLite;
- * later slices add the Yjs collab room, event queue, and idempotency records.
+ * ADR). Owns canonical content + access tokens in DO SQLite and, via
+ * y-partyserver's YServer, the live Yjs collaboration room (WebSocket
+ * hibernation, sync + awareness). Connections authenticate with HMAC collab
+ * session tokens minted by the Worker (see collab-token.ts); viewer-role
+ * connections are read-only. onLoad hydrates the Y.Doc 'prosemirror'
+ * fragment from stored markdown via the headless Milkdown engine; onSave
+ * (debounced) serializes it back and bumps the revision. Later slices add
+ * incremental Yjs update persistence (#8), the event queue (#12), and
+ * idempotency records (#10).
  */
 
-import { DurableObject } from 'cloudflare:workers';
+import { yXmlFragmentToProseMirrorRootNode, prosemirrorToYXmlFragment } from 'y-prosemirror';
+import { YServer } from 'y-partyserver';
+import type { Connection, ConnectionContext } from 'partyserver';
+import {
+  getHeadlessMilkdownParser,
+  parseMarkdownWithHtmlFallback,
+  serializeMarkdown,
+} from './headless-engine.js';
+import { resolveCollabSigningSecret, verifyCollabToken } from './collab-token';
 import type { ResolvedRole } from './util';
 
 export interface CreateDocumentInput {
@@ -40,12 +55,26 @@ export interface DocumentState extends DocumentMeta {
   ownerId: string | null;
 }
 
-export class DocumentDO extends DurableObject {
-  private sql = this.ctx.storage.sql;
+interface DoEnv {
+  PROOF_COLLAB_SIGNING_SECRET?: string;
+  PROOF_DEV_MODE?: string;
+}
 
-  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
+/** Yjs persist debounce, mirroring upstream COLLAB_PERSIST_DEBOUNCE_MS. */
+const PERSIST_DEBOUNCE_MS = 250;
+
+export class DocumentDO extends YServer {
+  static callbackOptions = {
+    debounceWait: PERSIST_DEBOUNCE_MS,
+    debounceMaxWait: 5_000,
+    timeout: 10_000,
+  };
+
+  private store = this.ctx.storage.sql;
+
+  constructor(ctx: DurableObjectState, env: DoEnv) {
     super(ctx, env);
-    this.sql.exec(`
+    this.store.exec(`
       CREATE TABLE IF NOT EXISTS document (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         slug TEXT NOT NULL,
@@ -74,9 +103,87 @@ export class DocumentDO extends DurableObject {
   }
 
   private row(): Record<string, unknown> | null {
-    const cursor = this.sql.exec('SELECT * FROM document WHERE id = 1');
+    const cursor = this.store.exec('SELECT * FROM document WHERE id = 1');
     const rows = cursor.toArray();
     return rows.length > 0 ? (rows[0] as Record<string, unknown>) : null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Collaboration (y-partyserver hooks)
+  // -------------------------------------------------------------------------
+
+  /** Verify the collab session token before letting the Yjs handshake begin. */
+  override async onConnect(conn: Connection, ctx: ConnectionContext): Promise<void> {
+    const doc = this.row();
+    const secret = resolveCollabSigningSecret(this.env as DoEnv);
+    const token = new URL(ctx.request.url).searchParams.get('token');
+    if (!doc || !secret || !token) {
+      conn.close(4401, 'missing or invalid collab token');
+      return;
+    }
+    const claims = await verifyCollabToken(secret, token, {
+      slug: String(doc.slug),
+      epoch: Number(doc.access_epoch),
+    });
+    if (!claims || String(doc.share_state) !== 'ACTIVE') {
+      conn.close(4401, 'missing or invalid collab token');
+      return;
+    }
+    conn.setState({ role: claims.role, sub: claims.sub });
+    super.onConnect(conn, ctx);
+  }
+
+  override isReadOnly(connection: Connection): boolean {
+    const state = connection.state as { role?: string } | null;
+    return state?.role === 'viewer';
+  }
+
+  /** Hydrate the Y.Doc 'prosemirror' fragment from stored markdown. */
+  override async onLoad(): Promise<void> {
+    const doc = this.row();
+    if (!doc) return;
+    const fragment = this.document.getXmlFragment('prosemirror');
+    if (fragment.length > 0) return; // already hydrated this lifetime
+    const markdown = String(doc.markdown ?? '');
+    if (!markdown.trim()) return;
+    const parser = await getHeadlessMilkdownParser();
+    const parsed = parseMarkdownWithHtmlFallback(parser, markdown);
+    if (!parsed.doc) {
+      console.error('collab hydrate: markdown parse failed', parsed.error);
+      return;
+    }
+    this.document.transact(() => {
+      prosemirrorToYXmlFragment(parsed.doc!, fragment);
+    });
+  }
+
+  /** Debounced persistence: serialize the fragment back to markdown. */
+  override async onSave(): Promise<void> {
+    const doc = this.row();
+    if (!doc) return;
+    const fragment = this.document.getXmlFragment('prosemirror');
+    if (fragment.length === 0) return;
+    const parser = await getHeadlessMilkdownParser();
+    const pmDoc = yXmlFragmentToProseMirrorRootNode(fragment, parser.schema);
+    const markdown = await serializeMarkdown(pmDoc);
+    if (markdown === String(doc.markdown)) return;
+    this.store.exec(
+      `UPDATE document
+         SET markdown = ?, revision = revision + 1, updated_at = ?
+       WHERE id = 1`,
+      markdown,
+      new Date().toISOString(),
+    );
+  }
+
+  /** Session facts for the Worker's collab-session route. */
+  async getCollabContext(): Promise<{ shareState: string; accessEpoch: number } | null> {
+    const doc = this.row();
+    if (!doc) return null;
+    return {
+      shareState: String(doc.share_state),
+      accessEpoch: Number(doc.access_epoch),
+    };
   }
 
   /** Create the document. Fails if this DO already holds one. */
@@ -84,7 +191,7 @@ export class DocumentDO extends DurableObject {
     if (this.row()) {
       return { ok: false, error: 'exists' };
     }
-    this.sql.exec(
+    this.store.exec(
       `INSERT INTO document
          (id, slug, doc_id, title, markdown, marks, revision, share_state,
           access_epoch, owner_id, owner_secret_hash, created_at, updated_at)
@@ -99,7 +206,7 @@ export class DocumentDO extends DurableObject {
       input.createdAt,
       input.createdAt,
     );
-    this.sql.exec(
+    this.store.exec(
       `INSERT INTO document_access (token_id, role, secret_hash, created_at, revoked_at)
        VALUES (?, ?, ?, ?, NULL)`,
       input.accessTokenId,
@@ -118,7 +225,7 @@ export class DocumentDO extends DurableObject {
     const doc = this.row();
     if (!doc || !secretHash) return null;
     if (doc.owner_secret_hash === secretHash) return 'owner_bot';
-    const rows = this.sql
+    const rows = this.store
       .exec(
         `SELECT role FROM document_access
          WHERE secret_hash = ? AND revoked_at IS NULL LIMIT 1`,

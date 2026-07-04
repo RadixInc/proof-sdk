@@ -24,6 +24,8 @@ jobs:
       - run: npm run typecheck:worker
       # Contract conformance: AGENT_CONTRACT.md as an executable gate.
       - run: npm run test:conformance
+      # Realtime collab: live YProvider clients against the DO room.
+      - run: npm run test:collab-sync
 
   leak-scan:
     runs-on: ubuntu-latest

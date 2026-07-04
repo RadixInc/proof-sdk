@@ -6,6 +6,7 @@
  * Later slices add the API router and the per-document Durable Object.
  */
 
+import { getServerByName } from 'partyserver';
 import { resolveIdentity, unauthorized } from './access';
 import type { AccessEnv } from './access';
 import { handleApiRequest } from './api';
@@ -40,6 +41,17 @@ export default {
 
     if (url.pathname === '/whoami') {
       return Response.json({ ok: true, identity });
+    }
+
+    // Collab WebSocket: hand the upgrade to the document's DO room.
+    // Token verification happens inside the DO (onConnect).
+    const collabMatch = url.pathname.match(/^\/documents\/([a-z0-9-]+)\/collab$/);
+    if (collabMatch && request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+      const stub = await getServerByName(
+        env.DOCUMENT_DO as unknown as Parameters<typeof getServerByName>[0],
+        collabMatch[1],
+      );
+      return stub.fetch(request);
     }
 
     const apiResponse = await handleApiRequest(request, env, identity);
