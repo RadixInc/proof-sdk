@@ -9,6 +9,12 @@
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Deployment config (Access team domain, AUD, signing secret, ...) is set
+  // in the dashboard (Worker > Settings > Variables & Secrets), never in the
+  // repo. keep_vars stops `wrangler deploy` from wiping plain-text dashboard
+  // variables on each deploy; encrypted secrets persist regardless.
+  "keep_vars": true,
+
   // The Vite build output (npm run build) served as static assets.
   "assets": {
     "directory": "./dist",
