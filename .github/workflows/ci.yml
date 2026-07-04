@@ -1,0 +1,47 @@
+# CI runs tests and typechecks only. Deployment is handled by Cloudflare
+# Workers Builds (production from main, previews from branches) — no deploy
+# steps belong in GitHub Actions.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The repo intentionally does not commit a package lock, so npm install
+      # (not npm ci) is used here.
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+      - run: npm run typecheck:worker
+      # Contract conformance: AGENT_CONTRACT.md as an executable gate.
+      - run: npm run test:conformance
+      # Realtime collab: live YProvider clients against the DO room.
+      - run: npm run test:collab-sync
+
+  leak-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so gitleaks scans every commit
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.24.3
+        run: |
+          curl -sL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+      - name: Secret scan (gitleaks, full history)
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose
+      - name: Organization-identifier scan
+        env:
+          LEAK_DENYLIST_PATTERNS: ${{ secrets.LEAK_DENYLIST_PATTERNS }}
+        run: bash scripts/check-org-leaks.sh

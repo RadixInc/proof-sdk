@@ -33,6 +33,18 @@ DerivedData/
 .env.local
 .env.*.local
 
+# Cloudflare — real deployment config is never committed (public repo);
+# copy wrangler.example.jsonc to wrangler.jsonc locally.
+wrangler.jsonc
+wrangler.toml
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Claude Code local settings
+.claude/settings.local.json
+
 # Secrets (API keys)
 Proof/Secrets.plist
 

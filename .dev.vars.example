@@ -1,0 +1,9 @@
+# Copy to .dev.vars (gitignored) for `wrangler dev`.
+# Dev identity injection works ONLY while Access is unconfigured
+# (no ACCESS_TEAM_DOMAIN/ACCESS_AUD) — never in a real deployment.
+PROOF_DEV_MODE=1
+DEV_IDENTITY=dev@example.com
+
+# For a deployed instance these come from Workers Builds variables, never the repo:
+# ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com
+# ACCESS_AUD=<YOUR_ACCESS_APP_AUD_TAG>

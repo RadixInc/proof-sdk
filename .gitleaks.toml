@@ -1,0 +1,39 @@
+# Gitleaks configuration — secret scanning gate for this PUBLIC repo.
+# See CLAUDE.md and docs/adr/2026-07-deployment-agnostic-public-core.md:
+# nothing organization-specific (secrets, account/resource IDs, internal
+# hostnames) is ever committed. Organization-identifier patterns themselves
+# are also never committed — CI reads them from the LEAK_DENYLIST_PATTERNS
+# repository secret (see .github/workflows/ci.yml).
+
+[extend]
+# Start from gitleaks' built-in rules.
+useDefault = true
+
+[[rules]]
+id = "cloudflare-account-id-assignment"
+description = "Cloudflare account_id in wrangler config (belongs in gitignored wrangler.jsonc only)"
+regex = '''(?i)account_id["'\s:=]+[a-f0-9]{32}'''
+
+[[rules]]
+id = "cloudflare-d1-database-id"
+description = "Concrete D1 database UUID in config (use <YOUR_D1_DATABASE_ID> placeholders)"
+regex = '''(?i)database_id["'\s:=]+[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}'''
+
+[[rules]]
+id = "cloudflare-access-service-token"
+description = "Cloudflare Access service token client id/secret"
+regex = '''[a-f0-9]{32,}\.access(?:\.[a-z0-9-]+)?'''
+
+[allowlist]
+description = "Placeholders and docs examples"
+regexTarget = "match"
+regexes = [
+  '''<YOUR_[A-Z0-9_]+>''',
+  '''docs\.example\.com''',
+  '''your-org''',
+  # Test-fixture idempotency keys asserted in suites (not credentials).
+  '''idempotency[-_]?key['"\s=!:]+['"]?idempotency-test-\d+''',
+]
+paths = [
+  '''wrangler\.example\.jsonc''',
+]

@@ -1,0 +1,62 @@
+// Example Wrangler configuration — copy to wrangler.jsonc and fill in your
+// own values. The real wrangler.jsonc is gitignored: this repo is public and
+// deployment-agnostic, so organization-specific values (account IDs, resource
+// IDs, hostnames) are never committed. See docs/adr/2026-07-deployment-agnostic-public-core.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "proof-sdk",
+  "main": "workers/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Deployment config (Access team domain, AUD, signing secret, ...) is set
+  // in the dashboard (Worker > Settings > Variables & Secrets), never in the
+  // repo. keep_vars stops `wrangler deploy` from wiping plain-text dashboard
+  // variables on each deploy; encrypted secrets persist regardless.
+  "keep_vars": true,
+
+  // The Vite build output (npm run build) served as static assets.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    // Public origin of your deployment (behind your Access application).
+    "PROOF_PUBLIC_ORIGIN": "https://docs.example.com",
+    // Cloudflare Access (authentication — see the access-authn ADR).
+    // REQUIRED for any deployed instance — uncomment and fill in. While
+    // these are unset, only PROOF_DEV_MODE=1 (see .dev.vars.example) admits
+    // anyone, which is for local `wrangler dev` only.
+    // "ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
+    // "ACCESS_AUD": "<YOUR_ACCESS_APP_AUD_TAG>",
+    "PROOF_DEV_MODE": "0"
+  },
+
+  // One Durable Object per document slug (see the workers-do-per-document ADR).
+  "durable_objects": {
+    "bindings": [{ "name": "DOCUMENT_DO", "class_name": "DocumentDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocumentDO"] }],
+
+  // Global document index. Create with: wrangler d1 create proof-sdk
+  // then put YOUR id here (in your local wrangler.jsonc, never committed).
+  // Any placeholder value works for local dev (wrangler dev uses local SQLite).
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "proof-sdk",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }]
+
+  // Filled in by a later slice (issue #14):
+  // "r2_buckets": [{
+  //   "binding": "SNAPSHOTS",
+  //   "bucket_name": "proof-sdk-snapshots"
+  // }]
+}

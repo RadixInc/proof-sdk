@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { HocuspocusProvider } from '@hocuspocus/provider';
+import YProvider from 'y-partyserver/provider';
 import type { Awareness } from 'y-protocols/awareness';
 import { shareClient, type CollabSessionInfo, type ShareRole } from './share-client';
 import { shouldPreserveMissingLocalMark } from './marks-preservation';
@@ -172,7 +172,7 @@ function applyYTextDiff(target: Y.Text, nextValue: string): void {
 
 export class CollabClient {
   private ydoc: Y.Doc | null = null;
-  private provider: HocuspocusProvider | null = null;
+  private provider: YProvider | null = null;
   private activeSession: CollabSessionInfo | null = null;
   private markdownText: Y.Text | null = null;
   private marksMap: Y.Map<unknown> | null = null;
@@ -206,7 +206,7 @@ export class CollabClient {
   }
 
   isConnected(): boolean {
-    return this.provider?.isConnected === true;
+    return this.provider?.wsconnected === true;
   }
 
   onMarks(handler: MarksHandler): void {
@@ -573,28 +573,27 @@ export class CollabClient {
     }
 
     const ydoc = new Y.Doc();
-    const wsUrl = (() => {
-      try {
-        const url = new URL(session.collabWsUrl);
-        url.searchParams.delete('slug');
-        return url.toString();
-      } catch {
-        return session.collabWsUrl.replace(/\?slug=.*$/, '');
-      }
-    })();
+    // collabWsUrl is server-issued and already points at the document's DO
+    // room (ws[s]://host/documents/<slug>/collab) — pass it as a prefix so
+    // YProvider does not append the room name to the path.
+    const wsUrl = new URL(session.collabWsUrl);
     const room = session.slug;
-    const provider = new HocuspocusProvider({
-      url: wsUrl,
-      name: room,
-      document: ydoc,
-      preserveConnection: false,
-      parameters: this.getProviderParameters(session),
-      token: () => this.activeSession?.token ?? null,
+    const provider = new YProvider(wsUrl.host, room, ydoc, {
+      prefix: wsUrl.pathname,
+      protocol: wsUrl.protocol === 'wss:' ? 'wss' : 'ws',
+      // Re-resolved on every (re)connect — token refresh needs no rewiring.
+      params: async () =>
+        this.activeSession ? this.getProviderParameters(this.activeSession) : {},
+      disableBc: true,
     });
 
     ydoc.on('update', (update, origin) => {
       if (!this.shouldPersistDurableUpdate(origin)) return;
       this.appendDurableUpdate(update);
+      if (!provider.wsconnected) {
+        this.unsyncedChanges += 1;
+        this.emitSyncStatus();
+      }
     });
 
     this.provider = provider;
@@ -609,9 +608,9 @@ export class CollabClient {
       this.marksHandler(this.readMarks());
     });
 
-    provider.on('awarenessChange', (event: { states: Array<unknown> }) => {
+    provider.awareness.on('change', () => {
       if (!this.presenceHandler) return;
-      this.presenceHandler(event.states.length);
+      this.presenceHandler(provider.awareness.getStates().size);
     });
 
     provider.on('status', (event: { status: ConnectionStatus }) => {
@@ -646,54 +645,34 @@ export class CollabClient {
       this.emitSyncStatus();
     });
 
-    provider.on('stateless', (payload: unknown) => {
-      const message = this.decodeStatelessMessage(payload);
-      if (!message) return;
-      const type = message.type;
-      if (type === 'document.updated') {
-        this.scheduleDocumentUpdatedResync();
+    // The DO closes unauthorized connections with 4401 (see document-do.ts).
+    provider.on('connection-close', (event: CloseEvent | null) => {
+      if (event && event.code === 4401) {
+        const reason = event.reason || 'permission-denied';
+        this.lastAuthenticationFailureReason = reason;
+        this.connectionStatus = 'disconnected';
+        this.hasSynced = false;
+        this.lastDisconnectAt = Date.now();
+        recordClientIncidentEvent({
+          type: 'collab.authentication_failed',
+          level: 'error',
+          message: `Collab authentication failed: ${reason}`,
+          data: {
+            slug: session.slug,
+            role: session.role,
+            reason,
+          },
+        });
       }
-    });
-
-    provider.on('authenticationFailed', (event: { reason?: string }) => {
-      const reason = typeof event?.reason === 'string' ? event.reason : 'permission-denied';
-      this.lastAuthenticationFailureReason = reason;
-      this.connectionStatus = 'disconnected';
-      this.hasSynced = false;
-      this.lastDisconnectAt = Date.now();
-      recordClientIncidentEvent({
-        type: 'collab.authentication_failed',
-        level: 'error',
-        message: `Collab authentication failed: ${reason}`,
-        data: {
-          slug: session.slug,
-          role: session.role,
-          reason,
-        },
-      });
       this.emitSyncStatus();
     });
 
-    provider.on('close', () => {
-      this.emitSyncStatus();
-    });
-
-    provider.on('unsyncedChanges', (changes: unknown) => {
-      if (typeof changes === 'number' && Number.isFinite(changes)) {
-        this.unsyncedChanges = Math.max(0, Math.floor(changes));
-      } else {
+    provider.on('synced', (state: boolean | { state?: boolean }) => {
+      this.hasSynced =
+        typeof state === 'boolean' ? state : state?.state !== false;
+      if (this.hasSynced) {
         this.unsyncedChanges = 0;
       }
-      if (!this.canPersistDurableUpdates(session.role) && this.unsyncedChanges > 0) {
-        this.debugLog('readonly-unsynced-changes', { changes: this.unsyncedChanges });
-      }
-      this.maybeClearDurableBuffer();
-      this.emitSyncStatus();
-    });
-
-    provider.on('synced', (event: { state?: boolean }) => {
-      const state = event?.state;
-      this.hasSynced = state !== false;
       this.maybeClearDurableBuffer();
       this.emitSyncStatus();
     });
@@ -725,14 +704,8 @@ export class CollabClient {
     this.hasSynced = false;
     this.emitSyncStatus();
 
-    this.provider.setConfiguration({
-      parameters: this.getProviderParameters(session),
-      token: () => this.activeSession?.token ?? null,
-    });
-    this.provider.configuration.websocketProvider.setConfiguration({
-      parameters: this.getProviderParameters(session),
-    });
-
+    // The provider's params function reads activeSession on every connect,
+    // so refreshing is just a reconnect with the already-updated session.
     this.provider.disconnect();
     void this.provider.connect();
     return true;
