@@ -8,8 +8,12 @@
 
 import { resolveIdentity, unauthorized } from './access';
 import type { AccessEnv } from './access';
+import { handleApiRequest } from './api';
+import type { ApiEnv } from './api';
 
-export interface Env extends AccessEnv {
+export { DocumentDO } from './document-do';
+
+export interface Env extends AccessEnv, ApiEnv {
   /** Static assets binding — the Vite build output in ./dist. */
   ASSETS: Fetcher;
   /** Build identifier injected at deploy time (Workers Builds sets this). */
@@ -37,6 +41,9 @@ export default {
     if (url.pathname === '/whoami') {
       return Response.json({ ok: true, identity });
     }
+
+    const apiResponse = await handleApiRequest(request, env, identity);
+    if (apiResponse) return apiResponse;
 
     return env.ASSETS.fetch(request);
   },

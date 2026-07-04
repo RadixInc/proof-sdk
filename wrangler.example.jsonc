@@ -24,23 +24,31 @@
     // Public origin of your deployment (behind your Access application).
     "PROOF_PUBLIC_ORIGIN": "https://docs.example.com",
     // Cloudflare Access (authentication — see the access-authn ADR).
-    // Set these for any deployed instance; leave unset locally and use
-    // .dev.vars (see .dev.vars.example) for dev identity injection.
-    "ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
-    "ACCESS_AUD": "<YOUR_ACCESS_APP_AUD_TAG>"
-  }
+    // REQUIRED for any deployed instance — uncomment and fill in. While
+    // these are unset, only PROOF_DEV_MODE=1 (see .dev.vars.example) admits
+    // anyone, which is for local `wrangler dev` only.
+    // "ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
+    // "ACCESS_AUD": "<YOUR_ACCESS_APP_AUD_TAG>",
+    "PROOF_DEV_MODE": "0"
+  },
 
-  // Filled in by later slices (issues #5, #7, #14):
-  //
-  // "durable_objects": {
-  //   "bindings": [{ "name": "DOCUMENT_DO", "class_name": "DocumentDO" }]
-  // },
-  // "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocumentDO"] }],
-  // "d1_databases": [{
-  //   "binding": "DB",
-  //   "database_name": "proof-sdk",
-  //   "database_id": "<YOUR_D1_DATABASE_ID>"
-  // }],
+  // One Durable Object per document slug (see the workers-do-per-document ADR).
+  "durable_objects": {
+    "bindings": [{ "name": "DOCUMENT_DO", "class_name": "DocumentDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocumentDO"] }],
+
+  // Global document index. Create with: wrangler d1 create proof-sdk
+  // then put YOUR id here (in your local wrangler.jsonc, never committed).
+  // Any placeholder value works for local dev (wrangler dev uses local SQLite).
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "proof-sdk",
+    "database_id": "00000000-0000-0000-0000-000000000000",
+    "migrations_dir": "migrations"
+  }]
+
+  // Filled in by a later slice (issue #14):
   // "r2_buckets": [{
   //   "binding": "SNAPSHOTS",
   //   "bucket_name": "proof-sdk-snapshots"
