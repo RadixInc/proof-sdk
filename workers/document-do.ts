@@ -138,10 +138,21 @@ export class DocumentDO extends YServer {
     return state?.role === 'viewer';
   }
 
-  /** Hydrate the Y.Doc 'prosemirror' fragment from stored markdown. */
+  /** Hydrate the Y.Doc ('prosemirror' fragment + 'marks' map) from storage. */
   override async onLoad(): Promise<void> {
     const doc = this.row();
     if (!doc) return;
+    const marksMap = this.document.getMap('marks');
+    if (marksMap.size === 0) {
+      try {
+        const marks = JSON.parse(String(doc.marks ?? '{}')) as Record<string, unknown>;
+        this.document.transact(() => {
+          for (const [key, value] of Object.entries(marks)) marksMap.set(key, value);
+        });
+      } catch {
+        // Corrupt marks JSON should not block collaboration on the text.
+      }
+    }
     const fragment = this.document.getXmlFragment('prosemirror');
     if (fragment.length > 0) return; // already hydrated this lifetime
     const markdown = String(doc.markdown ?? '');
@@ -166,12 +177,14 @@ export class DocumentDO extends YServer {
     const parser = await getHeadlessMilkdownParser();
     const pmDoc = yXmlFragmentToProseMirrorRootNode(fragment, parser.schema);
     const markdown = await serializeMarkdown(pmDoc);
-    if (markdown === String(doc.markdown)) return;
+    const marksJson = JSON.stringify(this.document.getMap('marks').toJSON());
+    if (markdown === String(doc.markdown) && marksJson === String(doc.marks)) return;
     this.store.exec(
       `UPDATE document
-         SET markdown = ?, revision = revision + 1, updated_at = ?
+         SET markdown = ?, marks = ?, revision = revision + 1, updated_at = ?
        WHERE id = 1`,
       markdown,
+      marksJson,
       new Date().toISOString(),
     );
   }
