@@ -12,10 +12,8 @@
  * that will land them; when one lands, move its assertions up here.
  */
 
-import { strict as assert } from 'node:assert';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { copyFileSync, existsSync } from 'node:fs';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { applyLocalMigrations, finish, startWorker } from './worker-harness';
+import type { WorkerHandle } from './worker-harness';
 
 const SKIPPED_SURFACES: Array<{ surface: string; reason: string }> = [
   { surface: 'POST /documents/:slug/ops (+ bridge comment/suggestion routes)', reason: 'lands with issue #10/#11' },
@@ -38,30 +36,7 @@ function ok(name: string, cond: boolean, detail?: unknown) {
   console.log(`ok: ${name}`);
 }
 
-interface Server {
-  proc: ChildProcess;
-  base: string;
-  stop(): void;
-}
-
-async function startWorker(port: number, vars: Record<string, string>): Promise<Server> {
-  const args = ['wrangler', 'dev', '--port', String(port)];
-  for (const [k, v] of Object.entries(vars)) args.push('--var', `${k}:${v}`);
-  const proc = spawn('npx', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-  const base = `http://localhost:${port}`;
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${base}/healthz`);
-      if (res.ok) return { proc, base, stop: () => proc.kill('SIGTERM') };
-    } catch {
-      /* not up yet */
-    }
-    await sleep(500);
-  }
-  proc.kill('SIGTERM');
-  throw new Error(`wrangler dev on :${port} did not become healthy in 60s`);
-}
+type Server = WorkerHandle;
 
 const AGENT = { 'x-dev-agent': 'conformance-agent' };
 const JSON_HDRS = { ...AGENT, 'content-type': 'application/json' };
@@ -220,15 +195,7 @@ async function disabledBattery(s: Server) {
 }
 
 async function main() {
-  if (!existsSync('wrangler.jsonc')) {
-    copyFileSync('wrangler.example.jsonc', 'wrangler.jsonc');
-    console.log('created wrangler.jsonc from example');
-  }
-  // Ensure local D1 migrations are applied before booting.
-  await new Promise<void>((resolve, reject) => {
-    const mig = spawn('npx', ['wrangler', 'd1', 'migrations', 'apply', 'proof-sdk', '--local'], { stdio: 'inherit' });
-    mig.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`migrations exit ${code}`))));
-  });
+  await applyLocalMigrations();
 
   const devVars = { PROOF_DEV_MODE: '1' };
 
@@ -266,7 +233,9 @@ async function main() {
   for (const s of SKIPPED_SURFACES) console.log(`  - ${s.surface} — ${s.reason}`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .then(() => finish(0))
+  .catch((err) => {
+    console.error(err);
+    finish(1);
+  });
