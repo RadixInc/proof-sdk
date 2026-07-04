@@ -1,0 +1,43 @@
+// Example Wrangler configuration — copy to wrangler.jsonc and fill in your
+// own values. The real wrangler.jsonc is gitignored: this repo is public and
+// deployment-agnostic, so organization-specific values (account IDs, resource
+// IDs, hostnames) are never committed. See docs/adr/2026-07-deployment-agnostic-public-core.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "proof-sdk",
+  "main": "workers/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The Vite build output (npm run build) served as static assets.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    // Public origin of your deployment (behind your Access application).
+    "PROOF_PUBLIC_ORIGIN": "https://docs.example.com"
+  }
+
+  // Filled in by later slices (issues #5, #7, #14):
+  //
+  // "durable_objects": {
+  //   "bindings": [{ "name": "DOCUMENT_DO", "class_name": "DocumentDO" }]
+  // },
+  // "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DocumentDO"] }],
+  // "d1_databases": [{
+  //   "binding": "DB",
+  //   "database_name": "proof-sdk",
+  //   "database_id": "<YOUR_D1_DATABASE_ID>"
+  // }],
+  // "r2_buckets": [{
+  //   "binding": "SNAPSHOTS",
+  //   "bucket_name": "proof-sdk-snapshots"
+  // }]
+}

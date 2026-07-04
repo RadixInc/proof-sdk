@@ -71,6 +71,21 @@ Canonical Proof SDK routes:
 
 Compatibility aliases remain mounted for the hosted product, but the routes above are the public SDK surface.
 
+## Deploy on Cloudflare
+
+This fork runs natively on Cloudflare Workers (see `docs/VISION.md` and `docs/adr/`). Deployment is handled by [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) connected to your fork: production deploys from `main`, and every non-production branch produces a preview build. GitHub Actions runs tests only.
+
+Local setup:
+
+```bash
+npm install
+npm run build        # build the editor bundle into dist/
+npm run cf:init      # copy wrangler.example.jsonc -> wrangler.jsonc (gitignored)
+npm run dev:worker   # serve via wrangler dev
+```
+
+This repo is deployment-agnostic and public: your real `wrangler.jsonc`, account IDs, hostnames, Access team domain, and secrets are never committed. Fill them in locally or as Workers Builds variables/secrets. See `CLAUDE.md` and `docs/adr/2026-07-deployment-agnostic-public-core.md`.
+
 ## Build
 
 ```bash
