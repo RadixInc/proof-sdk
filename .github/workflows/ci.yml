@@ -22,3 +22,22 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run typecheck:worker
+
+  leak-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so gitleaks scans every commit
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.24.3
+        run: |
+          curl -sL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+      - name: Secret scan (gitleaks, full history)
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose
+      - name: Organization-identifier scan
+        env:
+          LEAK_DENYLIST_PATTERNS: ${{ secrets.LEAK_DENYLIST_PATTERNS }}
+        run: bash scripts/check-org-leaks.sh
