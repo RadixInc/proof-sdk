@@ -34,17 +34,14 @@ export default {
       });
     }
 
-    const identity = await resolveIdentity(request, env);
-    if (!identity) {
-      return unauthorized(env);
-    }
-
-    if (url.pathname === '/whoami') {
-      return Response.json({ ok: true, identity });
-    }
-
-    // Collab WebSocket: hand the upgrade to the document's DO room.
-    // Token verification happens inside the DO (onConnect).
+    // Collab WebSocket: hand the upgrade to the document's DO room. This
+    // path sits before the edge identity gate deliberately — its credential
+    // is the HMAC collab session token (minted via an authenticated,
+    // document-token-gated route, verified in the DO at connect, revocable
+    // via the access epoch). Browser WebSocket upgrades cannot carry custom
+    // headers, so gating them on Access identity would break clients whose
+    // cookie is not forwarded while adding no authorization the token does
+    // not already prove.
     const collabMatch = url.pathname.match(/^\/documents\/([a-z0-9-]+)\/collab$/);
     if (collabMatch && request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
       const stub = await getServerByName(
@@ -52,6 +49,15 @@ export default {
         collabMatch[1],
       );
       return stub.fetch(request);
+    }
+
+    const identity = await resolveIdentity(request, env);
+    if (!identity) {
+      return unauthorized(env);
+    }
+
+    if (url.pathname === '/whoami') {
+      return Response.json({ ok: true, identity });
     }
 
     const apiResponse = await handleApiRequest(request, env, identity);
