@@ -15,7 +15,8 @@
     "cf:init": "node -e \"const fs=require('fs');if(!fs.existsSync('wrangler.jsonc')){fs.copyFileSync('wrangler.example.jsonc','wrangler.jsonc');console.log('Created wrangler.jsonc from example — fill in your values.')}else{console.log('wrangler.jsonc already exists.')}\"",
     "dev:worker": "wrangler dev",
     "typecheck:worker": "tsc -p tsconfig.worker.json",
-    "test": "npm run test:proof-sdk && npm run test:server-routes-share",
+    "test": "npm run test:proof-sdk && npm run test:server-routes-share && npm run test:worker-access",
+    "test:worker-access": "tsx src/tests/worker-access-identity.test.ts",
     "test:proof-sdk": "tsx src/tests/proof-sdk-agent-bridge-client.test.ts",
     "test:server-routes-share": "tsx src/tests/server-routes-and-share.test.ts",
     "demo:agent": "npm --workspace proof-example run demo:agent"
@@ -41,6 +42,7 @@
     "beautiful-mermaid": "^1.1.3",
     "better-sqlite3": "^12.6.2",
     "express": "^5.2.1",
+    "jose": "^6.2.3",
     "prismjs": "^1.30.0",
     "remark-frontmatter": "^5.0.0",
     "remark-gfm": "^4.0.1",

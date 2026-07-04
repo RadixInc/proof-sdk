@@ -40,6 +40,7 @@ wrangler.toml
 .wrangler/
 .dev.vars
 .dev.vars.*
+!.dev.vars.example
 
 # Claude Code local settings
 .claude/settings.local.json
