@@ -17,6 +17,7 @@
     "typecheck:worker": "tsc -p tsconfig.worker.json",
     "test": "npm run test:proof-sdk && npm run test:server-routes-share && npm run test:worker-access",
     "test:worker-access": "tsx src/tests/worker-access-identity.test.ts",
+    "test:conformance": "tsx src/tests/worker-conformance.test.ts",
     "test:proof-sdk": "tsx src/tests/proof-sdk-agent-bridge-client.test.ts",
     "test:server-routes-share": "tsx src/tests/server-routes-and-share.test.ts",
     "demo:agent": "npm --workspace proof-example run demo:agent"

@@ -22,6 +22,8 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run typecheck:worker
+      # Contract conformance: AGENT_CONTRACT.md as an executable gate.
+      - run: npm run test:conformance
 
   leak-scan:
     runs-on: ubuntu-latest
