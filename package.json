@@ -12,7 +12,7 @@
     "dev": "vite",
     "build": "vite build && node scripts/finalize-web-build.mjs",
     "serve": "tsx server/index.ts",
-    "cf:init": "node -e \"const fs=require('fs');if(!fs.existsSync('wrangler.jsonc')){fs.copyFileSync('wrangler.example.jsonc','wrangler.jsonc');console.log('Created wrangler.jsonc from example — fill in your values.')}else{console.log('wrangler.jsonc already exists.')}\"",
+    "cf:init": "node scripts/cf-init.mjs",
     "dev:worker": "wrangler dev",
     "typecheck:worker": "tsc -p tsconfig.worker.json",
     "test": "npm run test:proof-sdk && npm run test:server-routes-share && npm run test:worker-access",
