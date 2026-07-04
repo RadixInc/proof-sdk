@@ -11,16 +11,15 @@
  *   - collab-refresh mints a usable replacement token
  */
 
-import { strict as assert } from 'node:assert';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { copyFileSync, existsSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { applyLocalMigrations, finish, startWorker as harnessStartWorker } from './worker-harness';
+import type { WorkerHandle } from './worker-harness';
 import WebSocket from 'ws';
 import * as Y from 'yjs';
 import YProvider from 'y-partyserver/provider';
 
 const PORT = 8975;
-const BASE = `http://localhost:${PORT}`;
+const BASE = `http://127.0.0.1:${PORT}`;
 const AGENT = { 'x-dev-agent': 'collab-test' };
 const JSON_HDRS = { ...AGENT, 'content-type': 'application/json' };
 
@@ -34,34 +33,14 @@ function ok(name: string, cond: boolean, detail?: unknown) {
   console.log(`ok: ${name}`);
 }
 
-async function startWorker(): Promise<ChildProcess> {
-  if (!existsSync('wrangler.jsonc')) {
-    copyFileSync('wrangler.example.jsonc', 'wrangler.jsonc');
-  }
-  await new Promise<void>((resolve, reject) => {
-    const mig = spawn('npx', ['wrangler', 'd1', 'migrations', 'apply', 'proof-sdk', '--local'], { stdio: 'ignore' });
-    mig.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`migrations exit ${code}`))));
-  });
-  const proc = spawn(
-    'npx',
-    ['wrangler', 'dev', '--port', String(PORT), '--var', 'PROOF_DEV_MODE:1'],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${BASE}/healthz`);
-      if (res.ok) return proc;
-    } catch { /* not up yet */ }
-    await sleep(500);
-  }
-  proc.kill('SIGTERM');
-  throw new Error('wrangler dev did not become healthy');
+async function startWorker(): Promise<WorkerHandle> {
+  await applyLocalMigrations();
+  return harnessStartWorker(PORT, { PROOF_DEV_MODE: '1' });
 }
 
 function connectProvider(slug: string, token: string): { doc: Y.Doc; provider: YProvider } {
   const doc = new Y.Doc();
-  const provider = new YProvider(`localhost:${PORT}`, slug, doc, {
+  const provider = new YProvider(`127.0.0.1:${PORT}`, slug, doc, {
     prefix: `/documents/${slug}/collab`,
     params: { token },
     WebSocketPolyfill: WebSocket as unknown as typeof globalThis.WebSocket,
@@ -104,7 +83,7 @@ function appendParagraph(doc: Y.Doc, text: string) {
 }
 
 async function main() {
-  const proc = await startWorker();
+  const worker = await startWorker();
   const cleanups: Array<() => void> = [];
   try {
     // Create a document with recognizable content + a separate viewer token.
@@ -199,11 +178,13 @@ async function main() {
     for (const fn of cleanups) {
       try { fn(); } catch { /* ignore */ }
     }
-    proc.kill('SIGTERM');
+    worker.stop();
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .then(() => finish(0))
+  .catch((err) => {
+    console.error(err);
+    finish(1);
+  });
