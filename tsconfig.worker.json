@@ -11,5 +11,9 @@
     "isolatedModules": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["workers/**/*.ts"]
+  "include": ["workers/**/*.ts"],
+  // The headless engine belongs to the upstream-stable editor surface and
+  // does not pass the strict worker program; the headless-engine.js/.d.ts
+  // shim is the type boundary (see that file). Bundling follows the import.
+  "exclude": ["workers/milkdown-headless.ts"]
 }

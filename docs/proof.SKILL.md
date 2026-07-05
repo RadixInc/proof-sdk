@@ -18,7 +18,7 @@ Proof is the hosted product. Proof SDK is the open-source editor, collaboration 
 Shared URL format:
 
 ```text
-http://localhost:4000/d/<slug>?token=<token>
+http://localhost:8787/d/<slug>?token=<token>
 ```
 
 Use one of:
@@ -32,7 +32,7 @@ Use one of:
 ### Create a document
 
 ```bash
-curl -sS -X POST http://localhost:4000/documents \
+curl -sS -X POST http://localhost:8787/documents \
   -H "Content-Type: application/json" \
   -d '{"title":"My Document","markdown":"# Hello\n\nFirst draft."}'
 ```
@@ -42,7 +42,7 @@ Hosted Proof also keeps `POST /share/markdown` as a compatibility alias.
 ### Read state
 
 ```bash
-curl -sS "http://localhost:4000/documents/<slug>/state" \
+curl -sS "http://localhost:8787/documents/<slug>/state" \
   -H "Authorization: Bearer <token>" \
   -H "X-Agent-Id: <your-agent-id>"
 ```
@@ -52,32 +52,15 @@ Include `X-Agent-Id` on `GET /state` only when you want presence to appear for t
 Content negotiation also works directly on shared links:
 
 ```bash
-curl -sS -H "Accept: application/json" "http://localhost:4000/d/<slug>?token=<token>"
-curl -sS -H "Accept: text/markdown" "http://localhost:4000/d/<slug>?token=<token>"
+curl -sS -H "Accept: application/json" "http://localhost:8787/d/<slug>?token=<token>"
+curl -sS -H "Accept: text/markdown" "http://localhost:8787/d/<slug>?token=<token>"
 ```
 
 ### Get a snapshot for structured edits
 
 ```bash
-curl -sS "http://localhost:4000/documents/<slug>/snapshot" \
+curl -sS "http://localhost:8787/snapshots/<slug>.html" \
   -H "Authorization: Bearer <token>"
-```
-
-### Apply block edits with `edit/v2`
-
-```bash
-curl -sS -X POST "http://localhost:4000/documents/<slug>/edit/v2" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -H "Idempotency-Key: <unique-key>" \
-  -d '{
-    "by":"ai:codex",
-    "baseRevision":42,
-    "operations":[
-      {"op":"replace_block","ref":"b3","block":{"markdown":"Updated paragraph."}},
-      {"op":"insert_after","ref":"b3","blocks":[{"markdown":"## New section"}]}
-    ]
-  }'
 ```
 
 ### Apply comments, suggestions, and rewrites with `ops`
@@ -95,30 +78,21 @@ Endpoint:
 POST /documents/<slug>/ops
 ```
 
-Bridge-compatible deployments can also expose neutral bridge routes:
-
-```text
-GET  /documents/<slug>/bridge/state
-GET  /documents/<slug>/bridge/marks
-POST /documents/<slug>/bridge/comments
-POST /documents/<slug>/bridge/suggestions
-POST /documents/<slug>/bridge/rewrite
-POST /documents/<slug>/bridge/presence
-GET  /documents/<slug>/events
-POST /documents/<slug>/events/ack
-```
+`rewrite.apply` requires `baseRevision` (read it from `/documents/<slug>/state`)
+and accepts either full `content` or targeted `changes:[{find,replace}]`.
+Send an `Idempotency-Key` header on every mutation so retries stay safe.
 
 ### Poll events
 
 ```bash
-curl -sS "http://localhost:4000/documents/<slug>/events/pending?after=0" \
+curl -sS "http://localhost:8787/documents/<slug>/events/pending?after=0" \
   -H "Authorization: Bearer <token>"
 ```
 
 ### Send presence
 
 ```bash
-curl -sS -X POST "http://localhost:4000/documents/<slug>/presence" \
+curl -sS -X POST "http://localhost:8787/documents/<slug>/presence" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <token>" \
   -H "X-Agent-Id: <your-agent-id>" \
@@ -127,9 +101,9 @@ curl -sS -X POST "http://localhost:4000/documents/<slug>/presence" \
 
 ## Choosing an Edit Strategy
 
-- Use `edit/v2` for deterministic block-level edits.
-- Use `edit` for simple string-based operations.
-- Use `ops` for reviewable suggestions, comments, and rewrites.
+- Use `ops` with `suggestion.add` for reviewable changes humans can accept or reject.
+- Use `ops` with `rewrite.apply` (`changes` mode) for direct targeted edits.
+- Use `ops` with `rewrite.apply` (`content` mode) to replace a whole document.
 
 ## Error Handling
 
@@ -155,8 +129,8 @@ curl -sS -X POST "http://localhost:4000/documents/<slug>/presence" \
 
 ## References
 
-- Discovery JSON: `http://localhost:4000/.well-known/agent.json`
-- Docs: `http://localhost:4000/agent-docs`
-- Setup: `http://localhost:4000/agent-setup`
+- Discovery JSON: `http://localhost:8787/.well-known/agent.json`
+- Docs: `http://localhost:8787/agent-docs`
+- Setup: `http://localhost:8787/agent-setup`
 - [AGENT_CONTRACT.md](/Users/danshipper/CascadeProjects/every-proof/.worktrees/proof-sdk-split/AGENT_CONTRACT.md)
 - [agent-docs.md](/Users/danshipper/CascadeProjects/every-proof/.worktrees/proof-sdk-split/docs/agent-docs.md)

@@ -38,6 +38,8 @@ jobs:
       - run: npm run test:r2-snapshots
       # Personal library: per-identity visits, ownership attribution.
       - run: npm run test:library
+      # Bug-report bridge: env-configured filing against a mock GitHub API.
+      - run: npm run test:bug-reports
 
   leak-scan:
     runs-on: ubuntu-latest

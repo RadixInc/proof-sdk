@@ -1,8 +1,0 @@
-{
-  "name": "@proof/sqlite",
-  "private": true,
-  "type": "module",
-  "version": "0.1.0",
-  "description": "Proof SDK SQLite-backed document storage adapters",
-  "exports": "./src/index.ts"
-}

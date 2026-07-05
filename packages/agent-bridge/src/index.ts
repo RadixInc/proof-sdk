@@ -1,4 +1,3 @@
-import type { Router } from 'express';
 import {
   bridgeRoutes,
   type BridgeAuthMode,
@@ -152,11 +151,6 @@ async function requestJson<T>(
     throw new Error(error);
   }
   return body;
-}
-
-export async function createAgentBridgeRouter(): Promise<Router> {
-  const { bridgeRouter } = await import('../../../server/bridge.js');
-  return bridgeRouter;
 }
 
 export function createAgentBridgeClient(config: AgentBridgeClientConfig) {

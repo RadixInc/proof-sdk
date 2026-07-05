@@ -34,47 +34,47 @@ export default defineConfig({
     host: 'localhost',
     proxy: {
       '/assets': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/d': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/new': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/get-started': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/agent-docs': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/open': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/logout': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/proof.SKILL.md': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/snapshots': {
-        target: 'http://localhost:4000',
+        target: 'http://localhost:8787',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:4000',
+        target: 'ws://localhost:8787',
         ws: true,
       },
     },
