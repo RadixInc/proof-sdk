@@ -289,6 +289,55 @@ async function main() {
       persisted.markdown ?? finalBody.markdown,
     );
 
+    // --- human collab actions surface as agent events (issue #12) ----------
+    const humanMarkId = 'human-comment-1';
+    human.doc.transact(() => {
+      human.doc.getMap('marks').set(humanMarkId, {
+        kind: 'comment',
+        by: 'human:pat.example@example.com',
+        text: 'A human question',
+        quote: 'QUICK BROWN FOX',
+        threadId: humanMarkId,
+        thread: [],
+        resolved: false,
+        createdAt: new Date().toISOString(),
+      });
+    });
+    const humanEvent = await waitFor(() => false, 300).then(async () => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const res = await fetch(`${BASE}/documents/${slug}/events/pending?after=0&limit=200`, {
+          headers: { ...AGENT, 'x-share-token': token },
+        });
+        const body = (await res.json()) as Record<string, any>;
+        const match = (body.events as any[]).find(
+          (e) => e.type === 'comment.added' && e.data?.markId === humanMarkId,
+        );
+        if (match) return { match, cursor: Number(body.cursor) };
+        await sleep(250);
+      }
+      return null;
+    });
+    ok('human comment surfaces in events/pending', humanEvent !== null, humanEvent);
+    ok(
+      'human comment event attributes the human actor',
+      humanEvent!.match.actor === 'human:pat.example@example.com',
+      humanEvent!.match,
+    );
+
+    const ackHuman = await fetch(`${BASE}/documents/${slug}/events/ack`, {
+      method: 'POST',
+      headers: { ...JSON_HDRS, 'x-share-token': token },
+      body: JSON.stringify({ upToId: humanEvent!.cursor, by: 'agent:ops-test' }),
+    });
+    ok('ack after human event -> 200', ackHuman.status === 200);
+    const postAck = await fetch(
+      `${BASE}/documents/${slug}/events/pending?after=${humanEvent!.cursor}`,
+      { headers: { ...AGENT, 'x-share-token': token } },
+    );
+    const postAckBody = (await postAck.json()) as Record<string, any>;
+    ok('no events past the acked cursor', postAckBody.events.length === 0);
+
     console.log(`\nworker-agent-ops: ${passed} assertions passed`);
   } finally {
     for (const fn of cleanups) {

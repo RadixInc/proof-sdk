@@ -16,7 +16,6 @@ import { applyLocalMigrations, finish, startWorker } from './worker-harness';
 import type { WorkerHandle } from './worker-harness';
 
 const SKIPPED_SURFACES: Array<{ surface: string; reason: string }> = [
-  { surface: 'GET /documents/:slug/events/pending + POST events/ack', reason: 'lands with issue #12' },
   { surface: 'POST /documents/:slug/presence', reason: 'lands with issue #7 (collab)' },
   { surface: 'direct-share (create) per-IP rate limiting', reason: 'needs a cross-document limiter; ops mutation rate limiting shipped in #11' },
   { surface: 'OG card rendering', reason: 'deleted by design — see VISION.md anti-goals' },
@@ -277,6 +276,54 @@ async function baseBattery(s: Server) {
     body: JSON.stringify({ type: 'comment.add', payload: { by: 'ai:x', text: 'nope', quote: 'viewer body' } }),
   });
   ok('ops with viewer role -> 403 insufficient role', viewerOp.status === 403);
+
+  // --- agent event stream (issue #12)
+  const evHeaders = { ...AGENT, 'x-share-token': doc.accessToken };
+  const pendingRes = await fetch(`${s.base}/documents/${doc.slug}/events/pending?after=0`, { headers: evHeaders });
+  ok('events/pending -> 200', pendingRes.status === 200);
+  const pending = (await pendingRes.json()) as Record<string, any>;
+  ok('events: ops activity present with stable ids', Array.isArray(pending.events) && pending.events.some((e: any) => e.type === 'comment.added') && pending.events.some((e: any) => e.type === 'document.rewritten'), pending.events?.map((e: any) => e.type));
+  const ids = pending.events.map((e: any) => Number(e.id));
+  ok('events: ids strictly increasing', ids.every((id: number, i: number) => i === 0 || id > ids[i - 1]));
+  ok('events: cursor is last id', Number(pending.cursor) === ids[ids.length - 1]);
+
+  const pageRes = await fetch(`${s.base}/documents/${doc.slug}/events/pending?after=0&limit=1`, { headers: evHeaders });
+  const page = (await pageRes.json()) as Record<string, any>;
+  ok('events: limit=1 pages one event', page.events.length === 1 && Number(page.cursor) === Number(page.events[0].id));
+  const nextPageRes = await fetch(`${s.base}/documents/${doc.slug}/events/pending?after=${page.cursor}&limit=1`, { headers: evHeaders });
+  const nextPage = (await nextPageRes.json()) as Record<string, any>;
+  ok('events: cursor pagination advances', nextPage.events.length === 1 && Number(nextPage.events[0].id) > Number(page.events[0].id));
+
+  const ackRes = await fetch(`${s.base}/documents/${doc.slug}/events/ack`, {
+    method: 'POST',
+    headers: { ...evHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ upToId: Number(pending.cursor), by: 'agent:conformance' }),
+  });
+  const ack = (await ackRes.json()) as Record<string, any>;
+  ok('events/ack -> 200 + count', ackRes.status === 200 && Number(ack.acked) === ids.length, ack);
+  const afterAck = await fetch(`${s.base}/documents/${doc.slug}/events/pending?after=${pending.cursor}`, { headers: evHeaders });
+  const afterAckBody = (await afterAck.json()) as Record<string, any>;
+  ok('events: poll past cursor is empty', afterAckBody.events.length === 0 && Number(afterAckBody.cursor) === Number(pending.cursor));
+  const ackedVisible = await fetch(`${s.base}/documents/${doc.slug}/events/pending?after=0&limit=1`, { headers: evHeaders });
+  const ackedVisibleBody = (await ackedVisible.json()) as Record<string, any>;
+  ok('events: ack is advisory (ackedAt/ackedBy recorded)', ackedVisibleBody.events[0].ackedAt !== null && ackedVisibleBody.events[0].ackedBy === 'agent:conformance');
+
+  const agentAliasEvents = await fetch(`${s.base}/api/agent/${doc.slug}/events/pending?after=0`, { headers: evHeaders });
+  ok('GET /api/agent/:slug/events/pending alias -> 200', agentAliasEvents.status === 200);
+  const noTokEvents = await fetch(`${s.base}/documents/${doc.slug}/events/pending`, { headers: AGENT });
+  ok('events without token -> 401', noTokEvents.status === 401);
+  const viewerAck = await fetch(`${s.base}/documents/${viewerShareDoc.slug}/events/ack`, {
+    method: 'POST',
+    headers: { ...JSON_HDRS, 'x-share-token': viewerShareDoc.accessToken },
+    body: JSON.stringify({ upToId: 1 }),
+  });
+  ok('events/ack with viewer role -> 403', viewerAck.status === 403);
+  const badAck = await fetch(`${s.base}/documents/${doc.slug}/events/ack`, {
+    method: 'POST',
+    headers: { ...evHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ upToId: -3 }),
+  });
+  ok('events/ack invalid upToId -> 400', badAck.status === 400);
 
   // --- POST /share/markdown JSON (upstream L545, L1669)
   const shareRes = await fetch(`${s.base}/share/markdown`, {

@@ -736,6 +736,84 @@ async function handleOpenContext(
 }
 
 // ---------------------------------------------------------------------------
+// Agent events (issue #12)
+// ---------------------------------------------------------------------------
+
+function gateEventsAccess(
+  state: NonNullable<Awaited<ReturnType<DocumentDO['getState']>>>,
+  role: string | null,
+): Response | null {
+  if (state.shareState === 'DELETED') {
+    return json({ success: false, error: 'Document deleted' }, 410);
+  }
+  if (state.shareState !== 'ACTIVE' && role !== 'owner_bot') {
+    return json(
+      { success: false, error: 'Document is not currently accessible' },
+      403,
+    );
+  }
+  if (!role) {
+    return json(
+      { success: false, error: 'Missing or invalid share token', code: 'UNAUTHORIZED' },
+      401,
+    );
+  }
+  return null;
+}
+
+async function handleEventsPending(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+): Promise<Response> {
+  const { state, role } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  const denied = gateEventsAccess(state, role);
+  if (denied) return denied;
+  const url = new URL(request.url);
+  const after = Number(url.searchParams.get('after') ?? '0');
+  const limit = Number(url.searchParams.get('limit') ?? '100');
+  const stub = env.DOCUMENT_DO.get(env.DOCUMENT_DO.idFromName(slug));
+  const { events, cursor } = await stub.listEvents(after, limit);
+  return json({ success: true, events, cursor });
+}
+
+async function handleEventsAck(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+  identity: Identity,
+): Promise<Response> {
+  const { state, role } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  const denied = gateEventsAccess(state, role);
+  if (denied) return denied;
+  if (role !== 'editor' && role !== 'owner_bot') {
+    return json({ success: false, error: 'Insufficient role for operation' }, 403);
+  }
+  let body: Record<string, unknown> = {};
+  try {
+    const parsed = (await request.json()) as unknown;
+    if (isPlainObject(parsed)) body = parsed;
+  } catch {
+    // fall through to validation
+  }
+  const upToId = Number(body.upToId);
+  if (!Number.isInteger(upToId) || upToId < 0) {
+    return json({ success: false, error: 'upToId must be a non-negative integer' }, 400);
+  }
+  const by =
+    typeof body.by === 'string' && body.by.trim()
+      ? body.by.trim()
+      : identity.kind === 'agent'
+        ? `agent:${identity.serviceTokenId}`
+        : 'owner';
+  const stub = env.DOCUMENT_DO.get(env.DOCUMENT_DO.idFromName(slug));
+  const acked = await stub.ackEvents(upToId, by);
+  return json({ success: true, acked });
+}
+
+// ---------------------------------------------------------------------------
 // Agent ops (issue #10)
 // ---------------------------------------------------------------------------
 
@@ -814,6 +892,18 @@ export async function handleApiRequest(
     path.match(/^\/api\/agent\/([a-z0-9-]+)\/ops$/);
   if (method === 'POST' && opsMatch) {
     return forwardToDocumentDo(request, env, opsMatch[1], _identity, '/internal/ops');
+  }
+
+  const eventsMatch =
+    path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/events\/(pending|ack)$/) ??
+    path.match(/^\/api\/agent\/([a-z0-9-]+)\/events\/(pending|ack)$/);
+  if (eventsMatch) {
+    if (method === 'GET' && eventsMatch[2] === 'pending') {
+      return handleEventsPending(request, env, eventsMatch[1]);
+    }
+    if (method === 'POST' && eventsMatch[2] === 'ack') {
+      return handleEventsAck(request, env, eventsMatch[1], _identity);
+    }
   }
 
   const titleMatch = path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/title$/);
