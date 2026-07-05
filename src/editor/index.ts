@@ -170,7 +170,7 @@ import type { CommentSelector, Comment } from '../formats/provenance-sidecar';
 import { normalizeQuote, extractMarks, embedMarks, getThread, migrateProvenanceToMarks, type OrchestratedMarkMeta } from '../formats/marks';
 import { proofMarkHandler } from '../formats/remark-proof-marks';
 import { remarkProofMarksPlugin } from './schema/remark-proof-marks-plugin';
-import { getCurrentActor, setCurrentActor as setCurrentActorValue, normalizeActor } from './actor';
+import { getCurrentActor, setCurrentActor as setCurrentActorValue, normalizeActor, deriveDisplayNameFromEmail } from './actor';
 import {
   shouldKeepalivePersistShareContent,
   shouldKeepalivePersistShareMarks,
@@ -1367,31 +1367,36 @@ class ProofEditorImpl implements ProofEditor {
         : null;
       const wantsNamePrompt = options?.promptForName ?? true;
       const canActInDocument = Boolean(context?.capabilities?.canComment || context?.capabilities?.canEdit);
-      const existingViewerName = getViewerName();
-      this.shareViewerName = existingViewerName ?? this.shareViewerName ?? this.deriveDefaultShareViewerName();
-      setCurrentActorValue(`human:${this.shareViewerName || 'Anonymous'}`);
-      shareClient.setViewerName(this.shareViewerName || 'Anonymous');
-      collabClient.setLocalUser(
-        { name: this.shareViewerName || 'Anonymous' },
-        shareClient.getSlug() ?? undefined
-      );
-      if (wantsNamePrompt && canActInDocument && !existingViewerName) {
-        void promptForName()
-          .then((name) => {
-            const resolvedName = typeof name === 'string' && name.trim().length > 0
-              ? name.trim()
-              : this.deriveDefaultShareViewerName();
-            this.shareViewerName = resolvedName;
-            setCurrentActorValue(`human:${resolvedName}`);
-            shareClient.setViewerName(resolvedName);
-            collabClient.setLocalUser(
-              { name: resolvedName },
-              shareClient.getSlug() ?? undefined
-            );
-          })
-          .catch((error) => {
-            console.warn('[share] name prompt failed', error);
-          });
+      // Verified SSO identity wins over the self-declared viewer name and
+      // skips the name prompt entirely (issue #9).
+      const verifiedIdentityApplied = this.applyVerifiedShareIdentity(context?.session);
+      if (!verifiedIdentityApplied) {
+        const existingViewerName = getViewerName();
+        this.shareViewerName = existingViewerName ?? this.shareViewerName ?? this.deriveDefaultShareViewerName();
+        setCurrentActorValue(`human:${this.shareViewerName || 'Anonymous'}`);
+        shareClient.setViewerName(this.shareViewerName || 'Anonymous');
+        collabClient.setLocalUser(
+          { name: this.shareViewerName || 'Anonymous' },
+          shareClient.getSlug() ?? undefined
+        );
+        if (wantsNamePrompt && canActInDocument && !existingViewerName) {
+          void promptForName()
+            .then((name) => {
+              const resolvedName = typeof name === 'string' && name.trim().length > 0
+                ? name.trim()
+                : this.deriveDefaultShareViewerName();
+              this.shareViewerName = resolvedName;
+              setCurrentActorValue(`human:${resolvedName}`);
+              shareClient.setViewerName(resolvedName);
+              collabClient.setLocalUser(
+                { name: resolvedName },
+                shareClient.getSlug() ?? undefined
+              );
+            })
+            .catch((error) => {
+              console.warn('[share] name prompt failed', error);
+            });
+        }
       }
 
       const doc = context?.doc ?? await shareClient.fetchDocument();
@@ -1451,6 +1456,9 @@ class ProofEditorImpl implements ProofEditor {
         this.collabCanComment = Boolean(collabSession.capabilities.canComment);
         this.collabCanEdit = Boolean(collabSession.capabilities.canEdit);
         this.activeCollabSession = collabSession.session;
+        // Fallback path (open-context unavailable): the session fetched
+        // directly still carries the verified identity.
+        this.applyVerifiedShareIdentity(collabSession.session);
         this.collabConnectionStatus = 'connecting';
         this.collabIsSynced = false;
         this.collabUnsyncedChanges = 0;
@@ -1648,6 +1656,29 @@ class ProofEditorImpl implements ProofEditor {
       if (name.length > 0) return name;
     }
     return 'Anonymous';
+  }
+
+  /**
+   * When the collab session carries a verified human identity (SSO through
+   * the deployment's access layer), it becomes the identity end-to-end:
+   * provenance/comments attribute to the stable email actor, and presence
+   * shows a display name derived from it. Returns false when the session has
+   * no verified human identity (self-declared name flow applies).
+   */
+  private applyVerifiedShareIdentity(session?: CollabSessionInfo | null): boolean {
+    const identity = session?.identity;
+    if (!identity || identity.kind !== 'human') return false;
+    const email = typeof identity.email === 'string' ? identity.email.trim() : '';
+    if (!email) return false;
+    const displayName = deriveDisplayNameFromEmail(email);
+    this.shareViewerName = displayName;
+    setCurrentActorValue(`human:${email}`);
+    shareClient.setViewerName(displayName);
+    collabClient.setLocalUser(
+      { name: displayName },
+      shareClient.getSlug() ?? undefined
+    );
+    return true;
   }
 
   activateShareRuntime(options?: ShareRuntimeActivationOptions): boolean {

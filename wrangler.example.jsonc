@@ -54,6 +54,10 @@
     // anyone, which is for local `wrangler dev` only.
     // "ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
     // "ACCESS_AUD": "<YOUR_ACCESS_APP_AUD_TAG>",
+    // Role granted to SSO-authenticated humans opening a document without a
+    // share token (clean /d/:slug links). One of: viewer, commenter, editor.
+    // Agents always need a document token regardless of this setting.
+    // "PROOF_DEFAULT_HUMAN_ROLE": "editor",
     // Durability tuning (issue #8). Every Yjs update is persisted
     // synchronously; these control the derived-projection cadence.
     // "PROOF_COLLAB_PERSIST_DEBOUNCE_MS": "250",  // projection persist debounce

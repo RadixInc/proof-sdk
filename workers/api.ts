@@ -24,7 +24,7 @@ import {
   isShareRole,
   stripEphemeralCollabSpans,
 } from './util';
-import type { ShareRole } from './util';
+import type { ResolvedRole, ShareRole } from './util';
 
 export interface ApiEnv {
   DOCUMENT_DO: DurableObjectNamespace<DocumentDO>;
@@ -37,6 +37,7 @@ export interface ApiEnv {
   PROOF_COLLAB_SIGNING_SECRET?: string;
   PROOF_DEV_MODE?: string;
   COLLAB_SESSION_TTL_SECONDS?: string;
+  PROOF_DEFAULT_HUMAN_ROLE?: string;
 }
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // matches upstream express limits
@@ -530,20 +531,36 @@ async function handleDocRead(request: Request, env: ApiEnv, slug: string): Promi
 // Collab sessions
 // ---------------------------------------------------------------------------
 
+/**
+ * Instance-wide default role for tokenless SSO humans (see the access-authn
+ * ADR): Access already authenticated them, so a clean /d/:slug link grants
+ * this role on ACTIVE documents. Agents never get a default role — their
+ * access stays document-token-gated (unchanged contract behavior).
+ */
+function resolveDefaultHumanRole(env: ApiEnv): ShareRole {
+  const value = env.PROOF_DEFAULT_HUMAN_ROLE?.trim();
+  return isShareRole(value) ? value : 'editor';
+}
+
 async function handleCollabSession(
   request: Request,
   env: ApiEnv,
   slug: string,
   identity: Identity,
 ): Promise<Response> {
-  const { state, role } = await loadDocAndRole(request, env, slug);
+  const { state, role: tokenRole } = await loadDocAndRole(request, env, slug);
   if (!state) return json({ success: false, error: 'Document not found' }, 404);
-  if (state.shareState !== 'ACTIVE' && role !== 'owner_bot') {
+  if (state.shareState !== 'ACTIVE' && tokenRole !== 'owner_bot') {
+    // Runs before the default-role grant: paused/revoked documents block
+    // tokenless humans too.
     return json(
       { success: false, error: 'Document is not currently accessible' },
       403,
     );
   }
+  const role =
+    tokenRole ??
+    (identity.kind === 'human' ? resolveDefaultHumanRole(env) : null);
   if (!role) {
     return json(
       {
@@ -559,6 +576,38 @@ async function handleCollabSession(
       401,
     );
   }
+  const payload = await buildCollabSessionPayload(request, env, state, role, identity);
+  if (payload instanceof Response) return payload;
+  return json({ success: true, ...payload });
+}
+
+function capabilitiesForRole(role: ResolvedRole): {
+  canRead: boolean;
+  canComment: boolean;
+  canEdit: boolean;
+} {
+  return {
+    canRead: true,
+    canComment: role === 'commenter' || role === 'editor' || role === 'owner_bot',
+    canEdit: role === 'editor' || role === 'owner_bot',
+  };
+}
+
+/**
+ * Session + capabilities in the exact shape the web client validates
+ * (ShareClient.isCollabSessionInfo): missing fields make the browser
+ * silently degrade to no-collab mode.
+ */
+async function buildCollabSessionPayload(
+  request: Request,
+  env: ApiEnv,
+  state: NonNullable<Awaited<ReturnType<DocumentDO['getState']>>>,
+  role: ResolvedRole,
+  identity: Identity,
+): Promise<
+  | { session: Record<string, unknown>; capabilities: ReturnType<typeof capabilitiesForRole> }
+  | Response
+> {
   const secret = resolveCollabSigningSecret(env);
   if (!secret) {
     return json(
@@ -578,7 +627,7 @@ async function handleCollabSession(
   // Collab connections write through the editor; owner_bot maps to editor.
   const collabRole = role === 'owner_bot' ? 'editor' : role;
   const token = await signCollabToken(secret, {
-    slug,
+    slug: state.slug,
     role: collabRole,
     sub,
     exp,
@@ -586,16 +635,102 @@ async function handleCollabSession(
   });
   const base = getPublicBaseUrl(request, env);
   const wsBase = base.replace(/^http/, 'ws');
-  return json({
-    success: true,
+  return {
     session: {
-      slug,
+      docId: state.docId,
+      slug: state.slug,
       role: collabRole,
+      shareState: state.shareState,
+      accessEpoch: state.accessEpoch,
+      syncProtocol: 'pm-yjs-v1',
+      collabWsUrl: `${wsBase}/documents/${state.slug}/collab`,
       token,
-      collabWsUrl: `${wsBase}/documents/${slug}/collab`,
+      snapshotVersion: state.revision,
       expiresAt: new Date(exp * 1000).toISOString(),
       ttlSeconds: ttl,
+      // Verified identity, threaded to the client so presence and
+      // provenance attribute to the real actor (issue #9).
+      sub,
+      identity:
+        identity.kind === 'human'
+          ? { kind: 'human', email: identity.email }
+          : { kind: 'agent', serviceTokenId: identity.serviceTokenId },
     },
+    capabilities: capabilitiesForRole(role),
+  };
+}
+
+/**
+ * Combined boot endpoint for the web editor's /d/:slug flow: document,
+ * collab session, and capabilities in one round trip (the client's
+ * ShareClient.fetchOpenContext is the primary boot path).
+ */
+async function handleOpenContext(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+  identity: Identity,
+): Promise<Response> {
+  const { state, role: tokenRole } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  if (state.shareState === 'DELETED') {
+    return json({ success: false, error: 'Document deleted' }, 410);
+  }
+  if (state.shareState !== 'ACTIVE' && tokenRole !== 'owner_bot') {
+    return json(
+      { success: false, error: 'Document is not currently accessible' },
+      403,
+    );
+  }
+  const role =
+    tokenRole ??
+    (identity.kind === 'human' ? resolveDefaultHumanRole(env) : null);
+  if (!role) {
+    return json(
+      {
+        success: false,
+        error: 'Missing or invalid share token',
+        code: 'UNAUTHORIZED',
+        acceptedHeaders: [
+          'x-share-token: <ACCESS_TOKEN>',
+          'x-bridge-token: <OWNER_SECRET>',
+          'Authorization: Bearer <TOKEN>',
+        ],
+      },
+      401,
+    );
+  }
+
+  const base = getPublicBaseUrl(request, env);
+  const doc = {
+    slug: state.slug,
+    docId: state.docId,
+    title: state.title,
+    markdown: state.markdown,
+    marks: JSON.parse(state.marksJson),
+    active: state.shareState === 'ACTIVE',
+    shareState: state.shareState,
+    createdAt: state.createdAt,
+    updatedAt: state.updatedAt,
+    viewers: 0,
+  };
+  const payload = await buildCollabSessionPayload(request, env, state, role, identity);
+  const collab =
+    payload instanceof Response
+      ? { collabAvailable: false as const }
+      : payload;
+  return json({
+    success: true,
+    doc,
+    ...('session' in collab
+      ? { session: collab.session, capabilities: collab.capabilities }
+      : { collabAvailable: false, capabilities: capabilitiesForRole(role) }),
+    links: {
+      webUrl: base ? `${base}/d/${state.slug}` : `/d/${state.slug}`,
+      snapshotUrl: null,
+    },
+    mutationBase: null,
+    snapshotUrl: null,
   });
 }
 
@@ -628,6 +763,13 @@ export async function handleApiRequest(
   );
   if (method === 'GET' && stateMatch) {
     return handleState(request, env, stateMatch[1]);
+  }
+
+  const openContextMatch = path.match(
+    /^\/(?:api\/)?documents\/([a-z0-9-]+)\/open-context$/,
+  );
+  if (method === 'GET' && openContextMatch) {
+    return handleOpenContext(request, env, openContextMatch[1], _identity);
   }
 
   const healthMatch = path.match(/^\/documents\/([a-z0-9-]+)\/projection-health$/);
