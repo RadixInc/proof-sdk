@@ -22,7 +22,7 @@ export interface Env extends AccessEnv, ApiEnv {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // Health is the one identity-free route (uptime checks, Workers Builds).
@@ -60,7 +60,7 @@ export default {
       return Response.json({ ok: true, identity });
     }
 
-    const apiResponse = await handleApiRequest(request, env, identity);
+    const apiResponse = await handleApiRequest(request, env, identity, ctx);
     if (apiResponse) return apiResponse;
 
     return env.ASSETS.fetch(request);

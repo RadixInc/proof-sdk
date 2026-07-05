@@ -24,6 +24,7 @@
     "test:agent-ops": "tsx src/tests/worker-agent-ops.test.ts",
     "test:share-lifecycle": "tsx src/tests/worker-share-lifecycle.test.ts",
     "test:r2-snapshots": "tsx src/tests/worker-r2-snapshots.test.ts",
+    "test:library": "tsx src/tests/worker-library.test.ts",
     "test:proof-sdk": "tsx src/tests/proof-sdk-agent-bridge-client.test.ts",
     "test:server-routes-share": "tsx src/tests/server-routes-and-share.test.ts",
     "demo:agent": "npm --workspace proof-example run demo:agent"
