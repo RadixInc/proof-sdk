@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getDocumentBySlug } from './db.js';
 import { getCanonicalReadableDocumentSync } from './collab.js';
 import { recordSnapshotPublish } from './metrics.js';
@@ -14,19 +13,9 @@ const snapshotDir = process.env.SNAPSHOT_DIR || path.join(__dirname, '..', 'snap
 const snapshotPublicBase = process.env.SNAPSHOT_PUBLIC_BASE_URL?.trim() || null;
 const snapshotPublicTemplate = process.env.SNAPSHOT_PUBLIC_URL_TEMPLATE?.trim() || null;
 
-type SnapshotUploadConfig = {
-  bucket: string;
-  region: string;
-  endpoint?: string;
-  accessKeyId?: string;
-  secretAccessKey?: string;
-  keyPrefix: string;
-};
-
-let s3Client: S3Client | null = null;
-let warnedMissingUploadConfig = false;
-let uploadSequence = 0;
-const latestUploadSequenceBySlug = new Map<string, number>();
+// Object-store upload removed: snapshots are published to R2 by the Workers
+// runtime (workers/snapshot.ts). This legacy module keeps only the local-disk
+// path until the fork-finalization slice deletes server/ entirely.
 
 function ensureSnapshotDir(): void {
   if (!existsSync(snapshotDir)) {
@@ -48,74 +37,6 @@ function snapshotPath(slug: string): string {
     throw new Error('Invalid snapshot slug path');
   }
   return resolvedPath;
-}
-
-function getUploadConfig(): SnapshotUploadConfig | null {
-  const bucket = process.env.SNAPSHOT_S3_BUCKET?.trim();
-  if (!bucket) return null;
-  const region = process.env.SNAPSHOT_S3_REGION?.trim() || 'auto';
-  const endpoint = process.env.SNAPSHOT_S3_ENDPOINT?.trim();
-  const accessKeyId = process.env.SNAPSHOT_S3_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = process.env.SNAPSHOT_S3_SECRET_ACCESS_KEY?.trim();
-  const keyPrefix = (process.env.SNAPSHOT_S3_PREFIX || '').replace(/^\/+/, '').replace(/\/+$/, '');
-  return {
-    bucket,
-    region,
-    endpoint: endpoint || undefined,
-    accessKeyId: accessKeyId || undefined,
-    secretAccessKey: secretAccessKey || undefined,
-    keyPrefix,
-  };
-}
-
-function getS3Client(config: SnapshotUploadConfig): S3Client {
-  if (s3Client) return s3Client;
-  s3Client = new S3Client({
-    region: config.region,
-    endpoint: config.endpoint,
-    credentials: config.accessKeyId && config.secretAccessKey
-      ? {
-          accessKeyId: config.accessKeyId,
-          secretAccessKey: config.secretAccessKey,
-        }
-      : undefined,
-    forcePathStyle: Boolean(process.env.SNAPSHOT_S3_FORCE_PATH_STYLE === '1'),
-  });
-  return s3Client;
-}
-
-function objectKeyForSlug(slug: string, config: SnapshotUploadConfig): string {
-  return config.keyPrefix ? `${config.keyPrefix}/${slug}.html` : `${slug}.html`;
-}
-
-function queueObjectStoreUpload(slug: string, html: string): void {
-  const config = getUploadConfig();
-  if (!config) return;
-  const seq = ++uploadSequence;
-  latestUploadSequenceBySlug.set(slug, seq);
-
-  void (async () => {
-    const client = getS3Client(config);
-    const key = objectKeyForSlug(slug, config);
-    try {
-      await client.send(new PutObjectCommand({
-        Bucket: config.bucket,
-        Key: key,
-        Body: html,
-        ContentType: 'text/html; charset=utf-8',
-        CacheControl: 'public, max-age=60',
-      }));
-      if (latestUploadSequenceBySlug.get(slug) === seq) {
-        recordSnapshotPublish('success', 'object_store');
-      }
-    } catch (error) {
-      if (!warnedMissingUploadConfig) {
-        warnedMissingUploadConfig = true;
-      }
-      console.error('[snapshot] Failed to upload snapshot to object storage:', error);
-      recordSnapshotPublish('failure', 'object_store');
-    }
-  })();
 }
 
 function renderSnapshotHtml(input: {
@@ -190,7 +111,6 @@ export function refreshSnapshotForSlug(slug: string): boolean {
     return false;
   }
   recordSnapshotPublish('success', 'local');
-  queueObjectStoreUpload(slug, html);
   return true;
 }
 
@@ -211,9 +131,5 @@ export function getSnapshotPublicUrl(slug: string): string | null {
   if (snapshotPublicBase) {
     return `${snapshotPublicBase.replace(/\/$/, '')}/${encodeURIComponent(slug)}.html`;
   }
-  const config = getUploadConfig();
-  if (!config || !config.endpoint) return null;
-  const endpoint = config.endpoint.replace(/\/$/, '');
-  const key = objectKeyForSlug(slug, config).split('/').map(encodeURIComponent).join('/');
-  return `${endpoint}/${encodeURIComponent(config.bucket)}/${key}`;
+  return null;
 }

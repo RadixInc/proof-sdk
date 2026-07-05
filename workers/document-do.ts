@@ -57,6 +57,7 @@ import {
   buildAcceptedSuggestionMarkdownFromSelection,
   buildStoredSelectionMetadata,
 } from './visible-text';
+import { renderSnapshotHtml, snapshotObjectKey } from './snapshot';
 
 export interface CreateDocumentInput {
   slug: string;
@@ -112,6 +113,8 @@ interface DoEnv {
   PROOF_OPS_RATE_LIMIT_MAX?: string;
   PROOF_OPS_RATE_LIMIT_WINDOW_MS?: string;
   PROOF_EVENT_RETENTION_MAX?: string;
+  SNAPSHOTS?: R2Bucket;
+  PROOF_SNAPSHOT_PREFIX?: string;
 }
 
 /** Projection persist debounce, mirroring upstream COLLAB_PERSIST_DEBOUNCE_MS. */
@@ -497,6 +500,9 @@ export class DocumentDO extends YServer {
           // The D1 index is derived data; the DO row stays authoritative.
           console.error('d1 index refresh failed', err);
         }
+      }
+      if (changed) {
+        await this.publishSnapshot();
       }
     } finally {
       this.persisting = false;
@@ -1431,6 +1437,50 @@ export class DocumentDO extends YServer {
   }
 
   // -------------------------------------------------------------------------
+  // HTML share snapshots in R2 (issue #14)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Publish the read-only HTML snapshot to R2 (best effort, ACTIVE docs
+   * only). Runs on create, on every changed projection persist, and on
+   * resume; pause/revoke/delete remove the object.
+   */
+  private async publishSnapshot(): Promise<void> {
+    const env = this.env as DoEnv;
+    if (!env.SNAPSHOTS) return;
+    const doc = this.row();
+    if (!doc || String(doc.share_state) !== 'ACTIVE') return;
+    try {
+      const html = renderSnapshotHtml({
+        title: doc.title === null ? null : String(doc.title),
+        markdown: String(doc.markdown),
+        slug: String(doc.slug),
+        updatedAt: String(doc.updated_at),
+      });
+      await env.SNAPSHOTS.put(
+        snapshotObjectKey(String(doc.slug), env.PROOF_SNAPSHOT_PREFIX),
+        html,
+        { httpMetadata: { contentType: 'text/html; charset=utf-8' } },
+      );
+    } catch (err) {
+      console.error('snapshot publish failed', err);
+    }
+  }
+
+  private async removeSnapshot(): Promise<void> {
+    const env = this.env as DoEnv;
+    const doc = this.row();
+    if (!env.SNAPSHOTS || !doc) return;
+    try {
+      await env.SNAPSHOTS.delete(
+        snapshotObjectKey(String(doc.slug), env.PROOF_SNAPSHOT_PREFIX),
+      );
+    } catch (err) {
+      console.error('snapshot delete failed', err);
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Share lifecycle (issue #13)
   // -------------------------------------------------------------------------
 
@@ -1490,6 +1540,11 @@ export class DocumentDO extends YServer {
       } catch (err) {
         console.error('d1 index refresh failed', err);
       }
+    }
+    if (next === 'ACTIVE') {
+      await this.publishSnapshot();
+    } else {
+      await this.removeSnapshot();
     }
     const fresh = this.row()!;
     return {
@@ -1555,6 +1610,7 @@ export class DocumentDO extends YServer {
       input.accessSecretHash,
       input.createdAt,
     );
+    await this.publishSnapshot();
     return { ok: true };
   }
 
