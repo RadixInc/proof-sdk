@@ -23,6 +23,11 @@ export type ShareRole = 'viewer' | 'commenter' | 'editor' | 'owner_bot';
 export type ShareState = 'ACTIVE' | 'PAUSED' | 'REVOKED' | 'DELETED';
 export type AccessLinkRole = 'viewer' | 'commenter' | 'editor';
 
+/** Verified identity from the deployment's authentication layer (issue #9). */
+export type CollabSessionIdentity =
+  | { kind: 'human'; email: string }
+  | { kind: 'agent'; serviceTokenId: string };
+
 export interface CollabSessionInfo {
   docId: string;
   slug: string;
@@ -34,6 +39,9 @@ export interface CollabSessionInfo {
   token: string;
   snapshotVersion: number;
   expiresAt?: string;
+  /** Stable actor subject, e.g. the SSO email or "agent:<id>". */
+  sub?: string;
+  identity?: CollabSessionIdentity;
 }
 
 export interface ShareOpenContext {

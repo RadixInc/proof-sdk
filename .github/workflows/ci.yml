@@ -28,6 +28,8 @@ jobs:
       - run: npm run test:collab-sync
       # Durability: cold-restart replay, compaction, projection health.
       - run: npm run test:durability
+      # Human identity: SSO default role, open-context, session identity.
+      - run: npm run test:human-identity
 
   leak-scan:
     runs-on: ubuntu-latest
