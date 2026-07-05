@@ -111,6 +111,7 @@ interface DoEnv {
   PROOF_YJS_SNAPSHOT_EVERY_UPDATES?: string;
   PROOF_OPS_RATE_LIMIT_MAX?: string;
   PROOF_OPS_RATE_LIMIT_WINDOW_MS?: string;
+  PROOF_EVENT_RETENTION_MAX?: string;
 }
 
 /** Projection persist debounce, mirroring upstream COLLAB_PERSIST_DEBOUNCE_MS. */
@@ -338,6 +339,7 @@ export class DocumentDO extends YServer {
     this.document.on('update', (update: Uint8Array) => {
       this.persistUpdate(update);
     });
+    this.observeHumanMarkActivity();
 
     // Self-heal: a crash between update persistence and the debounced
     // projection write leaves projected_seq behind — catch up now.
@@ -419,6 +421,7 @@ export class DocumentDO extends YServer {
   override async onAlarm(): Promise<void> {
     this.alarmScheduled = false;
     await this.persistProjection();
+    this.pruneAckedEvents();
   }
 
   /**
@@ -702,6 +705,136 @@ export class DocumentDO extends YServer {
       }
     }
     return 'ai:unknown';
+  }
+
+  /**
+   * Event emission for HUMAN collab actions (issue #12): comments,
+   * replies, resolutions, and suggestion decisions made through the editor
+   * arrive as changes to the live 'marks' map. Agent ops are skipped by
+   * transaction origin — the ops pipeline already emits their events.
+   */
+  private observeHumanMarkActivity(): void {
+    const marksMap = this.document.getMap('marks');
+    const suggestionKinds = new Set(['insert', 'delete', 'replace']);
+    marksMap.observe((event) => {
+      if (event.transaction.origin === 'agent-op') return;
+      for (const [markId, change] of event.changes.keys) {
+        const mark = marksMap.get(markId) as OpStoredMark | undefined;
+        if (!mark || typeof mark !== 'object') continue;
+        const by = typeof mark.by === 'string' ? mark.by : null;
+        if (change.action === 'add') {
+          if (mark.kind === 'comment') {
+            this.addEvent(
+              'comment.added',
+              { markId, by, quote: mark.quote ?? null, text: mark.text ?? null },
+              by,
+            );
+          } else if (suggestionKinds.has(String(mark.kind))) {
+            this.addEvent(
+              'suggestion.added',
+              { markId, by, kind: mark.kind, quote: mark.quote ?? null },
+              by,
+            );
+          }
+          continue;
+        }
+        if (change.action !== 'update') continue;
+        const old = change.oldValue as OpStoredMark | undefined;
+        if (mark.kind === 'comment') {
+          const oldThread = Array.isArray(old?.thread) ? old.thread.length : 0;
+          const newThread = Array.isArray(mark.thread) ? mark.thread.length : 0;
+          if (newThread > oldThread) {
+            const last = (mark.thread as Array<Record<string, unknown>>)[newThread - 1];
+            this.addEvent(
+              'comment.replied',
+              { markId, by: last?.by ?? by, text: last?.text ?? null },
+              typeof last?.by === 'string' ? last.by : by,
+            );
+          } else if (Boolean(old?.resolved) !== Boolean(mark.resolved)) {
+            this.addEvent(
+              mark.resolved ? 'comment.resolved' : 'comment.unresolved',
+              { markId, by },
+              by,
+            );
+          }
+        } else if (
+          suggestionKinds.has(String(mark.kind)) &&
+          old?.status !== mark.status &&
+          (mark.status === 'accepted' || mark.status === 'rejected')
+        ) {
+          this.addEvent(
+            `suggestion.${mark.status}`,
+            { markId, status: mark.status, by },
+            by,
+          );
+        }
+      }
+    });
+  }
+
+  /** Agent event stream (issue #12): poll with a monotonic cursor. */
+  async listEvents(
+    after: number,
+    limit: number,
+  ): Promise<{
+    events: Array<Record<string, unknown>>;
+    cursor: number;
+  }> {
+    const a = Math.max(0, Math.trunc(Number(after) || 0));
+    const l = Math.max(1, Math.min(500, Math.trunc(Number(limit) || 100)));
+    const rows = this.store
+      .exec(
+        'SELECT * FROM document_event WHERE id > ? ORDER BY id ASC LIMIT ?',
+        a,
+        l,
+      )
+      .toArray();
+    const events = rows.map((row) => {
+      let data: unknown = {};
+      try {
+        data = JSON.parse(String(row.event_data));
+      } catch {
+        // tolerate malformed rows
+      }
+      return {
+        id: Number(row.id),
+        type: String(row.event_type),
+        data,
+        actor: row.actor === null ? null : String(row.actor),
+        createdAt: String(row.created_at),
+        ackedAt: row.acked_at === null ? null : String(row.acked_at),
+        ackedBy: row.acked_by === null ? null : String(row.acked_by),
+      };
+    });
+    return {
+      events,
+      cursor: events.length > 0 ? Number(events[events.length - 1].id) : a,
+    };
+  }
+
+  /** Ack events up to a cursor (at-least-once; advisory, upstream shape). */
+  async ackEvents(upToId: number, by: string): Promise<number> {
+    const cursor = this.store.exec(
+      'UPDATE document_event SET acked_by = ?, acked_at = ? WHERE id <= ? AND acked_at IS NULL',
+      by,
+      new Date().toISOString(),
+      Math.trunc(upToId),
+    );
+    return cursor.rowsWritten;
+  }
+
+  /** Bounded retention: prune old ACKED events past the cap (DO alarm). */
+  private pruneAckedEvents(): void {
+    const max = positiveInt(
+      (this.env as DoEnv).PROOF_EVENT_RETENTION_MAX,
+      1_000,
+    );
+    this.store.exec(
+      `DELETE FROM document_event
+        WHERE acked_at IS NOT NULL
+          AND id <= (SELECT MAX(id) FROM document_event) - ?`,
+      max,
+    );
   }
 
   /** Append to the durable per-document event log; returns the event id. */
