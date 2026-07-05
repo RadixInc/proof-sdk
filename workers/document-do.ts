@@ -39,7 +39,19 @@ import {
   serializeMarkdown,
 } from './headless-engine.js';
 import { resolveCollabSigningSecret, verifyCollabToken } from './collab-token';
+import { hashSecret } from './util';
 import type { ResolvedRole } from './util';
+import { canonicalizeStoredMarks } from '../src/formats/marks';
+import type { CommentReply, StoredMark } from '../src/formats/marks';
+import {
+  IMPLEMENTED_OPS,
+  authorizeDocumentOp,
+  parseDocumentOp,
+  parseOpAddressing,
+  resolveOpAnchor,
+} from './ops';
+import type { DocumentOpType, OpStoredMark } from './ops';
+import { buildStoredSelectionMetadata } from './visible-text';
 
 export interface CreateDocumentInput {
   slug: string;
@@ -161,6 +173,24 @@ export class DocumentDO extends YServer {
       );
       INSERT OR IGNORE INTO yjs_meta (id, snapshot_seq, projected_seq)
         VALUES (1, 0, 0);
+      CREATE TABLE IF NOT EXISTS document_event (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type TEXT NOT NULL,
+        event_data TEXT NOT NULL DEFAULT '{}',
+        actor TEXT,
+        created_at TEXT NOT NULL,
+        acked_by TEXT,
+        acked_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS idempotency_record (
+        idempotency_key TEXT NOT NULL,
+        route TEXT NOT NULL,
+        request_hash TEXT NOT NULL,
+        status_code INTEGER NOT NULL,
+        response_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (idempotency_key, route)
+      );
     `);
     // DOs created before the durability slice lack plain_text.
     const cols = this.store
@@ -500,6 +530,375 @@ export class DocumentDO extends YServer {
     const consistent =
       markdown === String(doc.markdown) && marksJson === String(doc.marks);
     return { ...base, consistent };
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent ops (issue #10): executed here, the single serialized writer.
+  // Marks are written into the live Y.Doc 'marks' map, so connected editors
+  // see them via normal Yjs broadcast and the durable update log persists
+  // them before the projection catches up.
+  // -------------------------------------------------------------------------
+
+  private opChain: Promise<unknown> = Promise.resolve();
+
+  /** Serialize ops: a replayed Idempotency-Key never races its original. */
+  private runSerialized<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.opChain.then(fn, fn);
+    this.opChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  /** Ops arrive via partyserver fetch so onStart/onLoad has always run. */
+  override async onRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method === 'POST' && url.pathname === '/internal/ops') {
+      return this.runSerialized(() => this.handleOpsRequest(request));
+    }
+    return Response.json({ success: false, error: 'Not found' }, { status: 404 });
+  }
+
+  private async handleOpsRequest(request: Request): Promise<Response> {
+    const doc = this.row();
+    if (!doc) {
+      return Response.json(
+        { success: false, error: 'Document not found' },
+        { status: 404 },
+      );
+    }
+    const bodyText = await request.text();
+    let raw: unknown;
+    try {
+      raw = JSON.parse(bodyText);
+    } catch {
+      raw = null;
+    }
+    const parsed = parseDocumentOp(raw);
+    if (!parsed.ok) {
+      return Response.json({ success: false, error: parsed.error }, { status: 400 });
+    }
+
+    const secretHash = request.headers.get('x-proof-secret-hash') || null;
+    const role = await this.resolveRole(secretHash);
+    const denied = authorizeDocumentOp(parsed.op, role, String(doc.share_state));
+    if (denied) {
+      return Response.json(denied.body, { status: denied.status });
+    }
+
+    const idempotencyKey = request.headers.get('x-proof-idempotency-key')?.trim() || null;
+    const route = `ops:${parsed.op}`;
+    const requestHash = await hashSecret(bodyText);
+    if (idempotencyKey) {
+      const record = this.store
+        .exec(
+          'SELECT request_hash, status_code, response_json FROM idempotency_record WHERE idempotency_key = ? AND route = ?',
+          idempotencyKey,
+          route,
+        )
+        .toArray();
+      if (record.length > 0) {
+        if (String(record[0].request_hash) !== requestHash) {
+          return Response.json(
+            {
+              success: false,
+              code: 'IDEMPOTENCY_KEY_REUSED',
+              error: 'Idempotency key was already used with a different request body',
+            },
+            { status: 409 },
+          );
+        }
+        return Response.json(JSON.parse(String(record[0].response_json)), {
+          status: Number(record[0].status_code),
+        });
+      }
+    }
+
+    const actor = this.deriveOpActor(request);
+    const result = await this.executeOp(parsed.op, parsed.payload, actor);
+
+    if (idempotencyKey && result.status >= 200 && result.status < 300) {
+      this.store.exec(
+        `INSERT OR REPLACE INTO idempotency_record
+           (idempotency_key, route, request_hash, status_code, response_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        idempotencyKey,
+        route,
+        requestHash,
+        result.status,
+        JSON.stringify(result.body),
+        new Date().toISOString(),
+      );
+    }
+    return Response.json(result.body, { status: result.status });
+  }
+
+  private deriveOpActor(request: Request): string {
+    const header = request.headers.get('x-proof-actor');
+    if (header) {
+      try {
+        const identity = JSON.parse(header) as Record<string, unknown>;
+        if (identity.kind === 'human' && typeof identity.email === 'string') {
+          return `human:${identity.email}`;
+        }
+        if (identity.kind === 'agent' && typeof identity.serviceTokenId === 'string') {
+          return `ai:${identity.serviceTokenId}`;
+        }
+      } catch {
+        // fall through to the default actor
+      }
+    }
+    return 'ai:unknown';
+  }
+
+  /** Append to the durable per-document event log; returns the event id. */
+  private addEvent(
+    type: string,
+    data: Record<string, unknown>,
+    actor: string | null,
+  ): number {
+    this.store.exec(
+      'INSERT INTO document_event (event_type, event_data, actor, created_at) VALUES (?, ?, ?, ?)',
+      type,
+      JSON.stringify(data),
+      actor,
+      new Date().toISOString(),
+    );
+    const row = this.store.exec('SELECT last_insert_rowid() AS id').toArray()[0];
+    return Number(row.id);
+  }
+
+  private marksSnapshot(): Record<string, StoredMark> {
+    return canonicalizeStoredMarks(
+      this.document.getMap('marks').toJSON() as Record<string, StoredMark>,
+    );
+  }
+
+  private setMark(markId: string, mark: OpStoredMark): void {
+    this.document.transact(() => {
+      this.document.getMap('marks').set(markId, mark);
+    }, 'agent-op');
+  }
+
+  /** Standard mutation success body (mirrors upstream persistMarks results). */
+  private async opSuccess(
+    eventId: number,
+    markId: string,
+    extra?: Record<string, unknown>,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    await this.persistProjection();
+    const fresh = this.row()!;
+    return {
+      status: 200,
+      body: {
+        success: true,
+        eventId,
+        markId,
+        shareState: String(fresh.share_state),
+        updatedAt: String(fresh.updated_at),
+        revision: Number(fresh.revision),
+        marks: this.marksSnapshot(),
+        ...extra,
+      },
+    };
+  }
+
+  private async executeOp(
+    op: DocumentOpType,
+    payload: Record<string, unknown>,
+    actor: string,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    if (!IMPLEMENTED_OPS.has(op)) {
+      return {
+        status: 501,
+        body: {
+          success: false,
+          code: 'OP_NOT_IMPLEMENTED',
+          error: `${op} lands with the agent write ops slice`,
+        },
+      };
+    }
+    // Ops resolve anchors against the current projection: catch it up first
+    // so live collab edits made moments ago are addressable.
+    await this.persistProjection();
+    const doc = this.row()!;
+    const markdown = String(doc.markdown);
+    const by =
+      typeof payload.by === 'string' && payload.by.trim() ? payload.by.trim() : actor;
+    const now = new Date().toISOString();
+
+    switch (op) {
+      case 'comment.add': {
+        const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+        if (!text) {
+          return { status: 400, body: { success: false, error: 'Missing text' } };
+        }
+        const addressing = parseOpAddressing(payload, 'Missing quote');
+        if (!addressing.ok) {
+          return { status: 400, body: { success: false, error: addressing.error } };
+        }
+        const resolved = resolveOpAnchor(
+          markdown,
+          addressing.target,
+          'Anchor text not found in current markdown',
+        );
+        if (!resolved.ok) return { status: resolved.status, body: resolved.body };
+        const meta = buildStoredSelectionMetadata(
+          markdown,
+          resolved.anchor.selection,
+          addressing.target.anchor,
+        );
+        const markId = crypto.randomUUID();
+        const mark: OpStoredMark = {
+          kind: 'comment',
+          by,
+          createdAt: now,
+          quote: meta.quote,
+          text,
+          threadId: markId,
+          thread: [],
+          resolved: false,
+          target: resolved.anchor.stabilizedTarget,
+          ...(meta.startRel ? { startRel: meta.startRel } : {}),
+          ...(meta.endRel ? { endRel: meta.endRel } : {}),
+        };
+        this.setMark(markId, mark);
+        const eventId = this.addEvent(
+          'comment.added',
+          { markId, by, quote: meta.quote, text },
+          by,
+        );
+        return this.opSuccess(eventId, markId);
+      }
+
+      case 'comment.reply': {
+        const markId = typeof payload.markId === 'string' ? payload.markId : '';
+        const text = typeof payload.text === 'string' ? payload.text.trim() : '';
+        if (!markId) {
+          return { status: 400, body: { success: false, error: 'Missing markId' } };
+        }
+        if (!text) {
+          return { status: 400, body: { success: false, error: 'Missing text' } };
+        }
+        const existing = this.document.getMap('marks').get(markId) as
+          | OpStoredMark
+          | undefined;
+        if (!existing) {
+          return { status: 404, body: { success: false, error: 'Mark not found' } };
+        }
+        const reply: CommentReply = { by, text, at: now };
+        const thread = Array.isArray(existing.thread) ? [...existing.thread] : [];
+        thread.push(reply);
+        this.setMark(markId, { ...existing, thread });
+        const eventId = this.addEvent('comment.replied', { markId, by, text }, by);
+        return this.opSuccess(eventId, markId, {
+          mark: this.document.getMap('marks').get(markId),
+        });
+      }
+
+      case 'comment.resolve':
+      case 'comment.unresolve': {
+        const markId = typeof payload.markId === 'string' ? payload.markId : '';
+        if (!markId) {
+          return { status: 400, body: { success: false, error: 'Missing markId' } };
+        }
+        const existing = this.document.getMap('marks').get(markId) as
+          | OpStoredMark
+          | undefined;
+        if (!existing) {
+          return { status: 404, body: { success: false, error: 'Mark not found' } };
+        }
+        const resolvedFlag = op === 'comment.resolve';
+        this.setMark(markId, { ...existing, resolved: resolvedFlag });
+        const eventId = this.addEvent(
+          resolvedFlag ? 'comment.resolved' : 'comment.unresolved',
+          { markId, by },
+          by,
+        );
+        return this.opSuccess(eventId, markId);
+      }
+
+      case 'suggestion.add': {
+        const kind = typeof payload.kind === 'string' ? payload.kind : '';
+        if (kind !== 'insert' && kind !== 'delete' && kind !== 'replace') {
+          return {
+            status: 400,
+            body: { success: false, error: 'Unsupported operation payload' },
+          };
+        }
+        const status = payload.status === undefined ? 'pending' : payload.status;
+        if (status === 'accepted') {
+          // Upstream's synchronous route defers immediate-accept to the
+          // async pipeline; the write ops slice (#11) brings it here.
+          return {
+            status: 409,
+            body: {
+              success: false,
+              code: 'ASYNC_REQUIRED',
+              error: 'suggestion.add with status "accepted" requires the async path',
+            },
+          };
+        }
+        if (status !== 'pending') {
+          return {
+            status: 400,
+            body: {
+              success: false,
+              error: 'suggestion.add only supports status "pending" or "accepted"',
+            },
+          };
+        }
+        const content = typeof payload.content === 'string' ? payload.content : '';
+        if ((kind === 'insert' || kind === 'replace') && !content) {
+          return { status: 400, body: { success: false, error: 'Missing content' } };
+        }
+        const addressing = parseOpAddressing(payload, 'Missing quote');
+        if (!addressing.ok) {
+          return { status: 400, body: { success: false, error: addressing.error } };
+        }
+        const resolved = resolveOpAnchor(
+          markdown,
+          addressing.target,
+          'Anchor text not found in current markdown',
+        );
+        if (!resolved.ok) return { status: resolved.status, body: resolved.body };
+        const meta = buildStoredSelectionMetadata(
+          markdown,
+          resolved.anchor.selection,
+          addressing.target.anchor,
+        );
+        const markId = crypto.randomUUID();
+        const mark: OpStoredMark = {
+          kind,
+          by,
+          createdAt: now,
+          quote: meta.quote,
+          status: 'pending',
+          target: resolved.anchor.stabilizedTarget,
+          ...(kind !== 'delete' ? { content } : {}),
+          ...(meta.startRel ? { startRel: meta.startRel } : {}),
+          ...(meta.endRel ? { endRel: meta.endRel } : {}),
+          range: {
+            from: resolved.anchor.selection.sourceStart,
+            to: resolved.anchor.selection.sourceEnd,
+          },
+        };
+        this.setMark(markId, mark);
+        const eventId = this.addEvent(
+          'suggestion.added',
+          { markId, by, kind, quote: meta.quote },
+          by,
+        );
+        return this.opSuccess(eventId, markId);
+      }
+
+      default:
+        return {
+          status: 400,
+          body: { success: false, error: 'Unsupported operation payload' },
+        };
+    }
   }
 
   /** Session facts for the Worker's collab-session route. */
