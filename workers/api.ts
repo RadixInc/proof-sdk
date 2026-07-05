@@ -24,6 +24,7 @@ import {
   isPlainObject,
   isShareRole,
   stripEphemeralCollabSpans,
+  timingSafeEqualStrings,
 } from './util';
 import type { ResolvedRole, ShareRole } from './util';
 
@@ -306,7 +307,7 @@ function getDirectSharePresentedToken(request: Request): string | null {
   return null;
 }
 
-function authorizeDirectShare(request: Request, env: ApiEnv): Response | null {
+async function authorizeDirectShare(request: Request, env: ApiEnv): Promise<Response | null> {
   let mode = env.PROOF_SHARE_MARKDOWN_AUTH_MODE?.trim() || 'none';
   if (mode === 'auto') mode = 'none';
   if (mode === 'none') return null;
@@ -324,7 +325,7 @@ function authorizeDirectShare(request: Request, env: ApiEnv): Response | null {
         503,
       );
     }
-    if (presented === apiKey) return null;
+    if (presented && (await timingSafeEqualStrings(presented, apiKey))) return null;
     if (mode === 'api_key') {
       return json(
         {
@@ -348,7 +349,7 @@ function authorizeDirectShare(request: Request, env: ApiEnv): Response | null {
 }
 
 async function handleShareMarkdown(request: Request, env: ApiEnv): Promise<Response> {
-  const denied = authorizeDirectShare(request, env);
+  const denied = await authorizeDirectShare(request, env);
   if (denied) return denied;
 
   const url = new URL(request.url);

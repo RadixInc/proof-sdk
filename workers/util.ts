@@ -80,6 +80,19 @@ export function getPublicBaseUrl(
   return new URL(request.url).origin;
 }
 
+/**
+ * Constant-time string equality via the Workers runtime's
+ * crypto.subtle.timingSafeEqual, so a configured secret (e.g. the direct-share
+ * API key) can't be recovered through response-time measurement.
+ */
+export async function timingSafeEqualStrings(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const bufA = enc.encode(a);
+  const bufB = enc.encode(b);
+  if (bufA.byteLength !== bufB.byteLength) return false;
+  return crypto.subtle.timingSafeEqual(bufA, bufB);
+}
+
 /** Presented app-level secret, matching upstream getPresentedSecret order. */
 export function getPresentedSecret(request: Request): string | null {
   const share = request.headers.get('x-share-token');
