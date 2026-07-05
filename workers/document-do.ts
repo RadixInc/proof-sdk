@@ -44,14 +44,19 @@ import type { ResolvedRole } from './util';
 import { canonicalizeStoredMarks } from '../src/formats/marks';
 import type { CommentReply, StoredMark } from '../src/formats/marks';
 import {
-  IMPLEMENTED_OPS,
   authorizeDocumentOp,
+  buildImplicitLegacyTarget,
   parseDocumentOp,
   parseOpAddressing,
   resolveOpAnchor,
+  stripAuthoredMarks,
+  validateRewritePayload,
 } from './ops';
 import type { DocumentOpType, OpStoredMark } from './ops';
-import { buildStoredSelectionMetadata } from './visible-text';
+import {
+  buildAcceptedSuggestionMarkdownFromSelection,
+  buildStoredSelectionMetadata,
+} from './visible-text';
 
 export interface CreateDocumentInput {
   slug: string;
@@ -104,6 +109,8 @@ interface DoEnv {
   PROOF_DEV_MODE?: string;
   PROOF_COLLAB_PERSIST_DEBOUNCE_MS?: string;
   PROOF_YJS_SNAPSHOT_EVERY_UPDATES?: string;
+  PROOF_OPS_RATE_LIMIT_MAX?: string;
+  PROOF_OPS_RATE_LIMIT_WINDOW_MS?: string;
 }
 
 /** Projection persist debounce, mirroring upstream COLLAB_PERSIST_DEBOUNCE_MS. */
@@ -555,9 +562,54 @@ export class DocumentDO extends YServer {
   override async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === 'POST' && url.pathname === '/internal/ops') {
+      const limited = this.checkOpsRateLimit(
+        request.headers.get('x-proof-client-ip') || 'unknown',
+      );
+      if (limited) return limited;
       return this.runSerialized(() => this.handleOpsRequest(request));
     }
+    if (request.method === 'PUT' && url.pathname === '/internal/document') {
+      return this.runSerialized(() => this.handlePutDocument(request));
+    }
+    if (request.method === 'PUT' && url.pathname === '/internal/title') {
+      return this.runSerialized(() => this.handlePutTitle(request));
+    }
     return Response.json({ success: false, error: 'Not found' }, { status: 404 });
+  }
+
+  /**
+   * Per-document, per-IP fixed-window limiter for mutation ops (upstream
+   * server/rate-limiter.ts semantics). In-memory: this DO instance is the
+   * single execution context for the document, and upstream's limiter reset
+   * on process restart the same way.
+   */
+  private rateBuckets = new Map<string, { windowStart: number; count: number }>();
+
+  private checkOpsRateLimit(ip: string): Response | null {
+    const env = this.env as DoEnv;
+    const max = positiveInt(env.PROOF_OPS_RATE_LIMIT_MAX, 120);
+    const windowMs = positiveInt(env.PROOF_OPS_RATE_LIMIT_WINDOW_MS, 60_000);
+    const now = Date.now();
+    const bucket = this.rateBuckets.get(ip);
+    if (!bucket || now - bucket.windowStart >= windowMs) {
+      this.rateBuckets.set(ip, { windowStart: now, count: 1 });
+      return null;
+    }
+    bucket.count += 1;
+    if (bucket.count <= max) return null;
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((bucket.windowStart + windowMs - now) / 1000),
+    );
+    return Response.json(
+      {
+        error: 'Rate limit exceeded',
+        code: 'RATE_LIMITED',
+        retryAfterSeconds,
+        limit: { maxRequests: max, windowMs },
+      },
+      { status: 429, headers: { 'retry-after': String(retryAfterSeconds) } },
+    );
   }
 
   private async handleOpsRequest(request: Request): Promise<Response> {
@@ -681,6 +733,68 @@ export class DocumentDO extends YServer {
     }, 'agent-op');
   }
 
+  /**
+   * Apply new markdown to the LIVE fragment through y-prosemirror's
+   * incremental updateYFragment diff. Unchanged nodes are reused and text
+   * edits become minimal Yjs operations, so concurrent human edits in other
+   * spans (or the same paragraph) merge through normal CRDT semantics — the
+   * coordination upstream needed rewrite barriers for.
+   */
+  private async applyMarkdownToLiveDoc(markdown: string): Promise<boolean> {
+    const parser = await getHeadlessMilkdownParser();
+    const parsed = parseMarkdownWithHtmlFallback(parser, markdown);
+    if (!parsed.doc) return false;
+    const fragment = this.document.getXmlFragment('prosemirror');
+    this.document.transact(() => {
+      prosemirrorToYXmlFragment(parsed.doc!, fragment);
+    }, 'agent-op');
+    return true;
+  }
+
+  /** Replace the marks map wholesale (used by rewrite/PUT semantics). */
+  private replaceMarksMap(next: Record<string, unknown>): void {
+    this.document.transact(() => {
+      const map = this.document.getMap('marks');
+      for (const key of [...map.keys()]) {
+        if (!(key in next)) map.delete(key);
+      }
+      for (const [key, value] of Object.entries(next)) map.set(key, value);
+    }, 'agent-op');
+  }
+
+  /** Re-resolve a stored suggestion's anchor against current markdown. */
+  private resolveStoredMarkAnchor(
+    mark: OpStoredMark,
+    markdown: string,
+  ):
+    | { ok: true; selection: { sourceStart: number; sourceEnd: number } }
+    | { ok: false; status: number; body: Record<string, unknown> } {
+    const target =
+      mark.target && typeof mark.target.anchor === 'string'
+        ? mark.target
+        : typeof mark.quote === 'string' && mark.quote
+          ? buildImplicitLegacyTarget(mark.quote)
+          : null;
+    if (!target) {
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          success: false,
+          code: 'ANCHOR_NOT_FOUND',
+          error: 'Suggestion has no resolvable anchor',
+        },
+      };
+    }
+    const resolved = resolveOpAnchor(
+      markdown,
+      target,
+      'Suggestion anchor could not be resolved in current markdown',
+    );
+    if (!resolved.ok) return resolved;
+    return { ok: true, selection: resolved.anchor.selection };
+  }
+
   /** Standard mutation success body (mirrors upstream persistMarks results). */
   private async opSuccess(
     eventId: number,
@@ -698,6 +812,7 @@ export class DocumentDO extends YServer {
         shareState: String(fresh.share_state),
         updatedAt: String(fresh.updated_at),
         revision: Number(fresh.revision),
+        markdown: String(fresh.markdown),
         marks: this.marksSnapshot(),
         ...extra,
       },
@@ -709,16 +824,6 @@ export class DocumentDO extends YServer {
     payload: Record<string, unknown>,
     actor: string,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
-    if (!IMPLEMENTED_OPS.has(op)) {
-      return {
-        status: 501,
-        body: {
-          success: false,
-          code: 'OP_NOT_IMPLEMENTED',
-          error: `${op} lands with the agent write ops slice`,
-        },
-      };
-    }
     // Ops resolve anchors against the current projection: catch it up first
     // so live collab edits made moments ago are addressable.
     await this.persistProjection();
@@ -828,19 +933,7 @@ export class DocumentDO extends YServer {
           };
         }
         const status = payload.status === undefined ? 'pending' : payload.status;
-        if (status === 'accepted') {
-          // Upstream's synchronous route defers immediate-accept to the
-          // async pipeline; the write ops slice (#11) brings it here.
-          return {
-            status: 409,
-            body: {
-              success: false,
-              code: 'ASYNC_REQUIRED',
-              error: 'suggestion.add with status "accepted" requires the async path',
-            },
-          };
-        }
-        if (status !== 'pending') {
+        if (status !== 'pending' && status !== 'accepted') {
           return {
             status: 400,
             body: {
@@ -890,7 +983,116 @@ export class DocumentDO extends YServer {
           { markId, by, kind, quote: meta.quote },
           by,
         );
+        if (status === 'accepted') {
+          const finalized = await this.finalizeSuggestion(markId, 'accepted', by);
+          if (finalized.status !== 200) return finalized;
+          return {
+            status: 200,
+            body: { ...finalized.body, acceptedImmediately: true },
+          };
+        }
         return this.opSuccess(eventId, markId);
+      }
+
+      case 'suggestion.accept':
+      case 'suggestion.reject': {
+        const markId = typeof payload.markId === 'string' ? payload.markId : '';
+        if (!markId) {
+          return { status: 400, body: { success: false, error: 'Missing markId' } };
+        }
+        return this.finalizeSuggestion(
+          markId,
+          op === 'suggestion.accept' ? 'accepted' : 'rejected',
+          by,
+        );
+      }
+
+      case 'rewrite.apply': {
+        const validated = validateRewritePayload(payload);
+        if (!validated.ok) return { status: validated.status, body: validated.body };
+        if (validated.baseRevision !== Number(doc.revision)) {
+          return {
+            status: 409,
+            body: {
+              success: false,
+              code: 'STALE_BASE',
+              error: 'Document has changed since the provided base revision',
+              latestRevision: Number(doc.revision),
+              latestUpdatedAt: String(doc.updated_at),
+              retryWithState: `/api/agent/${String(doc.slug)}/state`,
+            },
+          };
+        }
+
+        let nextMarkdown: string;
+        const provenanceSpans: Array<{ start: number; length: number; text: string }> = [];
+        if (validated.mode === 'content') {
+          nextMarkdown = validated.content!;
+        } else {
+          nextMarkdown = markdown;
+          for (const change of validated.changes!) {
+            const at = nextMarkdown.indexOf(change.find);
+            if (at === -1) {
+              return {
+                status: 409,
+                body: {
+                  success: false,
+                  error: 'Change target not found in current markdown',
+                  code: 'CHANGE_TARGET_NOT_FOUND',
+                  find: change.find,
+                },
+              };
+            }
+            nextMarkdown =
+              nextMarkdown.slice(0, at) + change.replace + nextMarkdown.slice(at + change.find.length);
+            if (change.replace.trim()) {
+              provenanceSpans.push({ start: at, length: change.replace.length, text: change.replace });
+            }
+          }
+        }
+
+        const applied = await this.applyMarkdownToLiveDoc(nextMarkdown);
+        if (!applied) {
+          return {
+            status: 400,
+            body: { success: false, error: 'Rewrite markdown failed to parse' },
+          };
+        }
+        if (validated.mode === 'content') {
+          // Full rewrite resets agent provenance (upstream stripAuthoredMarks);
+          // the document.rewritten event records authorship of the new body.
+          this.replaceMarksMap(
+            stripAuthoredMarks(this.document.getMap('marks').toJSON()),
+          );
+        } else {
+          // Partial rewrite: record agent provenance spans for changed text.
+          for (const span of provenanceSpans) {
+            const meta = buildStoredSelectionMetadata(
+              nextMarkdown,
+              { sourceStart: span.start, sourceEnd: span.start + span.length },
+              span.text,
+            );
+            this.setMark(crypto.randomUUID(), {
+              kind: 'authored',
+              by,
+              createdAt: now,
+              quote: meta.quote,
+              ...(meta.startRel ? { startRel: meta.startRel } : {}),
+              ...(meta.endRel ? { endRel: meta.endRel } : {}),
+            });
+          }
+        }
+        const eventId = this.addEvent(
+          'document.rewritten',
+          { by, mode: validated.mode },
+          by,
+        );
+        const result = await this.opSuccess(eventId, '', {
+          connectedClients: [...this.getConnections()].length,
+          rewriteBarrierApplied: false,
+        });
+        const { markId: _unused, ...body } = result.body;
+        return { status: result.status, body: { ...body, content: body.markdown } };
       }
 
       default:
@@ -899,6 +1101,200 @@ export class DocumentDO extends YServer {
           body: { success: false, error: 'Unsupported operation payload' },
         };
     }
+  }
+
+  /**
+   * Shared accept/reject path. Pending suggestions are stored marks (never
+   * applied text), so reject just flips status; accept splices the change
+   * into the markdown and applies it to the live fragment incrementally —
+   * upstream's rehydration pipeline reduced to the single-writer model.
+   */
+  private async finalizeSuggestion(
+    markId: string,
+    status: 'accepted' | 'rejected',
+    by: string,
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const map = this.document.getMap('marks');
+    const existing = map.get(markId) as OpStoredMark | undefined;
+    if (!existing) {
+      return { status: 404, body: { success: false, error: 'Mark not found' } };
+    }
+    if (existing.status === status) {
+      // Idempotent no-op, matching upstream updateSuggestionStatus.
+      const fresh = this.row()!;
+      return {
+        status: 200,
+        body: {
+          success: true,
+          markId,
+          status,
+          alreadyFinalized: true,
+          shareState: String(fresh.share_state),
+          updatedAt: String(fresh.updated_at),
+          revision: Number(fresh.revision),
+          markdown: String(fresh.markdown),
+          marks: this.marksSnapshot(),
+        },
+      };
+    }
+    const isTextSuggestion =
+      existing.kind === 'insert' || existing.kind === 'delete' || existing.kind === 'replace';
+    if (status === 'accepted' && isTextSuggestion) {
+      const doc = this.row()!;
+      const markdown = String(doc.markdown);
+      const resolved = this.resolveStoredMarkAnchor(existing, markdown);
+      if (!resolved.ok) return { status: resolved.status, body: resolved.body };
+      const nextMarkdown = buildAcceptedSuggestionMarkdownFromSelection(
+        markdown,
+        existing as never,
+        resolved.selection,
+      );
+      const applied = await this.applyMarkdownToLiveDoc(nextMarkdown);
+      if (!applied) {
+        return {
+          status: 400,
+          body: { success: false, error: 'Accepted suggestion failed to parse' },
+        };
+      }
+    }
+    this.setMark(markId, { ...existing, status });
+    const eventId = this.addEvent(
+      status === 'accepted' ? 'suggestion.accepted' : 'suggestion.rejected',
+      { markId, status, by },
+      by,
+    );
+    return this.opSuccess(eventId, markId, {
+      status,
+      ...(existing.content !== undefined ? { content: existing.content } : {}),
+    });
+  }
+
+  /** PUT /documents/:slug — REST document update (legacy bridge clients). */
+  private async handlePutDocument(request: Request): Promise<Response> {
+    const gate = await this.gateWriteRequest(request);
+    if (gate.denied) return gate.denied;
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(await request.text()) as Record<string, unknown>;
+    } catch {
+      return Response.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
+    }
+    const markdown =
+      typeof body.markdown === 'string'
+        ? body.markdown
+        : typeof body.content === 'string'
+          ? body.content
+          : null;
+    if (markdown === null || !markdown.trim()) {
+      return Response.json(
+        { success: false, error: 'markdown field is required', code: 'MISSING_MARKDOWN' },
+        { status: 400 },
+      );
+    }
+    await this.persistProjection();
+    const doc = this.row()!;
+    const baseRaw = body.baseRevision ?? body.expectedRevision;
+    if (baseRaw !== undefined) {
+      const base = Number(baseRaw);
+      if (!Number.isInteger(base) || base !== Number(doc.revision)) {
+        return Response.json(
+          {
+            success: false,
+            code: 'STALE_BASE',
+            error: 'Document has changed since the provided base revision',
+            latestRevision: Number(doc.revision),
+            latestUpdatedAt: String(doc.updated_at),
+          },
+          { status: 409 },
+        );
+      }
+    }
+    const applied = await this.applyMarkdownToLiveDoc(markdown);
+    if (!applied) {
+      return Response.json(
+        { success: false, error: 'markdown failed to parse' },
+        { status: 400 },
+      );
+    }
+    if (body.marks !== undefined && typeof body.marks === 'object' && body.marks !== null && !Array.isArray(body.marks)) {
+      this.replaceMarksMap(
+        canonicalizeStoredMarks(body.marks as Record<string, StoredMark>) as Record<string, unknown>,
+      );
+    }
+    const eventId = this.addEvent('document.updated', { by: gate.actor }, gate.actor);
+    const result = await this.opSuccess(eventId, '', {});
+    const { markId: _unused, ...resultBody } = result.body;
+    return Response.json({ ...resultBody, content: resultBody.markdown });
+  }
+
+  /** PUT /documents/:slug/title */
+  private async handlePutTitle(request: Request): Promise<Response> {
+    const gate = await this.gateWriteRequest(request);
+    if (gate.denied) return gate.denied;
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(await request.text()) as Record<string, unknown>;
+    } catch {
+      return Response.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
+    }
+    const title =
+      body.title === null ? null : typeof body.title === 'string' ? body.title.trim() : undefined;
+    if (title === undefined) {
+      return Response.json(
+        { success: false, error: 'title must be a string or null' },
+        { status: 400 },
+      );
+    }
+    const now = new Date().toISOString();
+    this.store.exec(
+      'UPDATE document SET title = ?, updated_at = ? WHERE id = 1',
+      title === '' ? null : title,
+      now,
+    );
+    const doc = this.row()!;
+    const db = (this.env as DoEnv).DB;
+    if (db) {
+      try {
+        await db
+          .prepare('UPDATE documents SET title = ?, updated_at = ? WHERE slug = ?')
+          .bind(doc.title === null ? null : String(doc.title), now, String(doc.slug))
+          .run();
+      } catch (err) {
+        console.error('d1 index refresh failed', err);
+      }
+    }
+    this.addEvent(
+      'document.title.updated',
+      { title: doc.title === null ? null : String(doc.title), by: gate.actor },
+      gate.actor,
+    );
+    return Response.json({
+      success: true,
+      title: doc.title === null ? null : String(doc.title),
+      updatedAt: now,
+    });
+  }
+
+  /** Shared auth gate for REST write routes: editor or owner required. */
+  private async gateWriteRequest(
+    request: Request,
+  ): Promise<{ denied: Response | null; actor: string }> {
+    const doc = this.row();
+    if (!doc) {
+      return {
+        denied: Response.json(
+          { success: false, error: 'Document not found' },
+          { status: 404 },
+        ),
+        actor: 'ai:unknown',
+      };
+    }
+    const role = await this.resolveRole(request.headers.get('x-proof-secret-hash'));
+    const denied = authorizeDocumentOp('rewrite.apply', role, String(doc.share_state));
+    return {
+      denied: denied ? Response.json(denied.body, { status: denied.status }) : null,
+      actor: this.deriveOpActor(request),
+    };
   }
 
   /** Session facts for the Worker's collab-session route. */

@@ -33,14 +33,81 @@ export const DOCUMENT_OP_TYPES = [
 
 export type DocumentOpType = (typeof DOCUMENT_OP_TYPES)[number];
 
-/** Ops shipped by the marks slice; the writes slice (#11) enables the rest. */
-export const IMPLEMENTED_OPS: ReadonlySet<DocumentOpType> = new Set([
-  'comment.add',
-  'comment.reply',
-  'comment.resolve',
-  'comment.unresolve',
-  'suggestion.add',
-]);
+/** All contract ops are implemented as of the writes slice (#11). */
+export const IMPLEMENTED_OPS: ReadonlySet<DocumentOpType> = new Set(DOCUMENT_OP_TYPES);
+
+/** Upstream MAX_REWRITE_CHANGES (server/canonical-document.ts). */
+export const MAX_REWRITE_CHANGES = 1000;
+
+export type RewriteChange = { find: string; replace: string };
+
+/**
+ * Port of upstream rewrite.apply payload validation: full-doc `content` XOR
+ * partial `changes`, plus a required base revision (the DO checks it against
+ * the live revision after catching the projection up).
+ */
+export function validateRewritePayload(
+  payload: Record<string, unknown>,
+):
+  | {
+      ok: true;
+      mode: 'content' | 'changes';
+      content?: string;
+      changes?: RewriteChange[];
+      baseRevision: number;
+    }
+  | { ok: false; status: number; body: Record<string, unknown> } {
+  const bad = (status: number, error: string, code?: string) => ({
+    ok: false as const,
+    status,
+    body: { success: false, error, ...(code ? { code } : {}) },
+  });
+  const hasContent = typeof payload.content === 'string';
+  const hasChanges = Array.isArray(payload.changes);
+  if (hasContent === hasChanges) {
+    return bad(400, 'Provide either content or changes (not both)');
+  }
+  const baseRaw = payload.baseRevision ?? payload.expectedRevision;
+  const baseRevision = Number(baseRaw);
+  if (!Number.isInteger(baseRevision) || baseRevision < 1) {
+    return bad(400, 'rewrite.apply requires baseRevision (or expectedRevision)');
+  }
+  if (hasContent) {
+    const content = payload.content as string;
+    if (!content.trim()) return bad(400, 'markdown must not be empty', 'EMPTY_MARKDOWN');
+    return { ok: true, mode: 'content', content, baseRevision };
+  }
+  const rawChanges = payload.changes as unknown[];
+  if (rawChanges.length === 0) return bad(400, 'changes must not be empty');
+  if (rawChanges.length > MAX_REWRITE_CHANGES) {
+    return bad(400, `changes is limited to ${MAX_REWRITE_CHANGES} entries`);
+  }
+  const changes: RewriteChange[] = [];
+  for (const raw of rawChanges) {
+    if (
+      !isRecord(raw) ||
+      typeof raw.find !== 'string' ||
+      raw.find.length === 0 ||
+      typeof raw.replace !== 'string'
+    ) {
+      return bad(400, 'Each change requires a non-empty find and a string replace');
+    }
+    changes.push({ find: raw.find, replace: raw.replace });
+  }
+  return { ok: true, mode: 'changes', changes, baseRevision };
+}
+
+/** Port of upstream stripAuthoredMarks (server/canonical-document.ts). */
+export function stripAuthoredMarks(
+  marks: Record<string, unknown>,
+): Record<string, unknown> {
+  const filtered: Record<string, unknown> = {};
+  for (const [markId, mark] of Object.entries(marks)) {
+    if (isRecord(mark) && mark.kind === 'authored') continue;
+    filtered[markId] = mark;
+  }
+  return filtered;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

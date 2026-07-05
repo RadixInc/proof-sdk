@@ -184,6 +184,102 @@ async function main() {
     );
     ok('persisted revision advanced', Number(stateBody.revision) > 1);
 
+    // --- write ops under live concurrency (issue #11) -----------------------
+    // The pending suggestion replaces 'lazy dog' -> 'sleepy dog' in the same
+    // paragraph the human is actively typing into. Both must survive.
+    const fragment = human.doc.getXmlFragment('prosemirror');
+    const paragraph = (fragment.toArray() as Y.XmlElement[]).find((node) =>
+      node.toString().includes('lazy dog'),
+    );
+    ok('found live paragraph with suggestion target', !!paragraph);
+    const textNode = paragraph!.get(0) as Y.XmlText;
+
+    const typed: string[] = [];
+    const typeChar = (ch: string) => {
+      human.doc.transact(() => {
+        textNode.insert(textNode.length, ch);
+      });
+      typed.push(ch);
+    };
+    const typingDone = (async () => {
+      for (const ch of 'abcde') {
+        typeChar(ch);
+        await sleep(30);
+      }
+    })();
+    await sleep(60); // typing is in flight
+    const acceptRes = await postOp(slug, token, {
+      type: 'suggestion.accept',
+      payload: { markId: suggestionId },
+    });
+    ok('suggestion.accept during live typing -> 200', acceptRes.status === 200, acceptRes.body);
+    await typingDone;
+    for (const ch of 'fghij') {
+      typeChar(ch);
+      await sleep(30);
+    }
+
+    const converged = await waitFor(() => {
+      const text = human.doc.getXmlFragment('prosemirror').toString();
+      return text.includes('sleepy dog') && text.includes('abcde') && text.includes('fghij');
+    }, 15_000);
+    const finalText = human.doc.getXmlFragment('prosemirror').toString();
+    ok('accept + concurrent keystrokes both survive', converged, finalText);
+    ok('no lost or duplicated replacement', !finalText.includes('lazy dog') && (finalText.match(/sleepy dog/g) ?? []).length === 1, finalText);
+    ok('all ten concurrent keystrokes present in order', finalText.includes('abcde') && finalText.includes('fghij'), finalText);
+
+    // rewrite.apply (changes mode) while the human keeps editing elsewhere.
+    const preRewrite = await fetch(`${BASE}/documents/${slug}/state`, {
+      headers: { ...AGENT, 'x-share-token': token },
+    });
+    const preRevision = Number(((await preRewrite.json()) as any).revision);
+    const rewriteTyping = (async () => {
+      for (const ch of 'klmno') {
+        typeChar(ch);
+        await sleep(30);
+      }
+    })();
+    const rewriteRes = await postOp(slug, token, {
+      type: 'rewrite.apply',
+      payload: {
+        by: 'ai:rewriter',
+        changes: [{ find: 'quick brown fox', replace: 'QUICK BROWN FOX' }],
+        baseRevision: preRevision,
+      },
+    });
+    await rewriteTyping;
+    ok('rewrite.apply during live typing -> 200', rewriteRes.status === 200, rewriteRes.body);
+    const rewriteConverged = await waitFor(() => {
+      const text = human.doc.getXmlFragment('prosemirror').toString();
+      return text.includes('QUICK BROWN FOX') && text.includes('klmno');
+    }, 15_000);
+    ok('rewrite + surrounding concurrent edits both survive', rewriteConverged, human.doc.getXmlFragment('prosemirror').toString());
+    ok(
+      'rewrite recorded agent provenance',
+      Object.values(rewriteRes.body.marks as Record<string, any>).some(
+        (m) => m.kind === 'authored' && m.by === 'ai:rewriter',
+      ),
+    );
+
+    // Everything lands in the persisted projection.
+    const finalState = await fetch(`${BASE}/documents/${slug}/state`, {
+      headers: { ...AGENT, 'x-share-token': token },
+    });
+    const finalBody = (await finalState.json()) as Record<string, any>;
+    const persisted = await waitFor(() => false, 800).then(async () => {
+      const res = await fetch(`${BASE}/documents/${slug}/state`, {
+        headers: { ...AGENT, 'x-share-token': token },
+      });
+      return (await res.json()) as Record<string, any>;
+    });
+    ok(
+      'persisted projection reflects accept + rewrite + keystrokes',
+      String(persisted.markdown).includes('sleepy dog') &&
+        String(persisted.markdown).includes('QUICK BROWN FOX') &&
+        String(persisted.markdown).includes('klmno'),
+      persisted.markdown ?? finalBody.markdown,
+    );
+
     console.log(`\nworker-agent-ops: ${passed} assertions passed`);
   } finally {
     for (const fn of cleanups) {

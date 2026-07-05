@@ -16,11 +16,9 @@ import { applyLocalMigrations, finish, startWorker } from './worker-harness';
 import type { WorkerHandle } from './worker-harness';
 
 const SKIPPED_SURFACES: Array<{ surface: string; reason: string }> = [
-  { surface: '/ops write ops (suggestion.accept/reject, rewrite.apply)', reason: 'lands with issue #11' },
   { surface: 'GET /documents/:slug/events/pending + POST events/ack', reason: 'lands with issue #12' },
   { surface: 'POST /documents/:slug/presence', reason: 'lands with issue #7 (collab)' },
-  { surface: 'PUT /documents/:slug, PUT /documents/:slug/title', reason: 'lands with issue #10/#11' },
-  { surface: 'direct-share per-IP rate limiting (429 + Retry-After)', reason: 'DO-based limiter, issue #11' },
+  { surface: 'direct-share (create) per-IP rate limiting', reason: 'needs a cross-document limiter; ops mutation rate limiting shipped in #11' },
   { surface: 'OG card rendering', reason: 'deleted by design — see VISION.md anti-goals' },
 ];
 
@@ -177,12 +175,95 @@ async function baseBattery(s: Server) {
   });
   ok('POST /api/agent/:slug/ops alias -> 200', agentAlias.status === 200);
 
-  const notImplemented = await fetch(opsUrl, {
+  // --- write ops (issue #11): accept, reject, rewrite, PUT routes
+  const acceptRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: { ...opHeaders, 'idempotency-key': 'conf-accept-1' },
+    body: JSON.stringify({ type: 'suggestion.accept', payload: { markId: suggest.markId } }),
+  });
+  const accept = (await acceptRes.json()) as Record<string, any>;
+  ok('ops suggestion.accept -> 200 + text applied', acceptRes.status === 200 && String(accept.markdown).includes('Improved body') && !String(accept.markdown).includes('Conformance body'), accept.markdown);
+  ok('ops accept: mark status accepted', accept.marks[suggest.markId].status === 'accepted');
+  const acceptReplay = await fetch(opsUrl, {
+    method: 'POST',
+    headers: { ...opHeaders, 'idempotency-key': 'conf-accept-1' },
+    body: JSON.stringify({ type: 'suggestion.accept', payload: { markId: suggest.markId } }),
+  });
+  const acceptReplayBody = (await acceptReplay.json()) as Record<string, any>;
+  ok('ops accept idempotent replay -> no double-apply', acceptReplay.status === 200 && (String(acceptReplayBody.markdown).match(/Improved body/g) ?? []).length === 1, acceptReplayBody.markdown);
+  const acceptAgain = await fetch(opsUrl, {
     method: 'POST',
     headers: opHeaders,
     body: JSON.stringify({ type: 'suggestion.accept', payload: { markId: suggest.markId } }),
   });
-  ok('ops write ops staged for #11 -> 501 OP_NOT_IMPLEMENTED', notImplemented.status === 501 && ((await notImplemented.json()) as any).code === 'OP_NOT_IMPLEMENTED');
+  const acceptAgainBody = (await acceptAgain.json()) as Record<string, any>;
+  ok('ops accept of finalized mark -> 200 alreadyFinalized', acceptAgain.status === 200 && acceptAgainBody.alreadyFinalized === true);
+
+  const rejSuggest = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'suggestion.add', payload: { kind: 'delete', by: 'ai:conformance', quote: 'Improved body' } }),
+  });
+  const rejSuggestBody = (await rejSuggest.json()) as Record<string, any>;
+  const rejectRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'suggestion.reject', payload: { markId: rejSuggestBody.markId } }),
+  });
+  const reject = (await rejectRes.json()) as Record<string, any>;
+  ok('ops suggestion.reject -> 200, markdown unchanged', rejectRes.status === 200 && String(reject.markdown).includes('Improved body') && reject.marks[rejSuggestBody.markId].status === 'rejected');
+
+  const staleRewrite = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'rewrite.apply', payload: { changes: [{ find: 'Improved', replace: 'Refined' }], baseRevision: 1 } }),
+  });
+  ok('ops rewrite stale base -> 409 STALE_BASE + latestRevision', staleRewrite.status === 409 && (await staleRewrite.json() as any).code === 'STALE_BASE');
+  const noBaseRewrite = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'rewrite.apply', payload: { changes: [{ find: 'x', replace: 'y' }] } }),
+  });
+  ok('ops rewrite without base -> 400', noBaseRewrite.status === 400);
+
+  const stateForBase = await fetch(`${s.base}/documents/${doc.slug}/state`, {
+    headers: { ...AGENT, 'x-share-token': doc.accessToken },
+  });
+  const baseRevision = Number(((await stateForBase.json()) as any).revision);
+  const rewriteRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: { ...opHeaders, 'idempotency-key': 'conf-rewrite-1' },
+    body: JSON.stringify({ type: 'rewrite.apply', payload: { by: 'ai:rewriter', changes: [{ find: 'Improved body', replace: 'Rewritten body' }], baseRevision } }),
+  });
+  const rewrite = (await rewriteRes.json()) as Record<string, any>;
+  ok('ops rewrite.apply changes -> 200 + applied', rewriteRes.status === 200 && String(rewrite.markdown).includes('Rewritten body'), rewrite);
+  ok('ops rewrite records agent provenance', Object.values(rewrite.marks as Record<string, any>).some((m) => m.kind === 'authored' && m.by === 'ai:rewriter'), rewrite.marks);
+  const missRewrite = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'rewrite.apply', payload: { changes: [{ find: 'not-in-doc-at-all', replace: 'x' }], baseRevision: Number(rewrite.revision) } }),
+  });
+  ok('ops rewrite change target miss -> 409', missRewrite.status === 409 && ((await missRewrite.json()) as any).code === 'CHANGE_TARGET_NOT_FOUND');
+
+  const putTitle = await fetch(`${s.base}/documents/${doc.slug}/title`, {
+    method: 'PUT',
+    headers: opHeaders,
+    body: JSON.stringify({ title: 'Renamed by agent' }),
+  });
+  ok('PUT /documents/:slug/title -> 200', putTitle.status === 200 && ((await putTitle.json()) as any).title === 'Renamed by agent');
+  const putDoc = await fetch(`${s.base}/documents/${doc.slug}`, {
+    method: 'PUT',
+    headers: opHeaders,
+    body: JSON.stringify({ markdown: '# Replaced\n\nFull PUT body.' }),
+  });
+  const putDocBody = (await putDoc.json()) as Record<string, any>;
+  ok('PUT /documents/:slug -> 200 + content replaced', putDoc.status === 200 && String(putDocBody.markdown).includes('Full PUT body'), putDocBody);
+  const putNoTok = await fetch(`${s.base}/documents/${doc.slug}`, {
+    method: 'PUT',
+    headers: JSON_HDRS,
+    body: JSON.stringify({ markdown: '# Nope' }),
+  });
+  ok('PUT without token -> 401', putNoTok.status === 401);
 
   const viewerShare = await fetch(`${s.base}/share/markdown`, {
     method: 'POST',
@@ -248,6 +329,21 @@ async function warnAndApiKeyBattery(s: Server) {
   const body = (await res.json()) as Record<string, any>;
   ok('legacy warn: body deprecation.mode', body.deprecation?.mode === 'warn');
   ok('legacy warn: canonicalPath /documents', body.deprecation?.canonicalPath === '/documents');
+
+  // --- per-document ops rate limiting (issue #11; this config sets max=3)
+  const rlHeaders = { ...JSON_HDRS, 'x-share-token': body.accessToken };
+  let limited: Response | null = null;
+  for (let i = 0; i < 5 && !limited; i += 1) {
+    const attempt = await fetch(`${s.base}/documents/${body.slug}/ops`, {
+      method: 'POST',
+      headers: rlHeaders,
+      body: JSON.stringify({ type: 'comment.add', payload: { by: 'ai:rl', text: `c${i}`, quote: 'Legacy' } }),
+    });
+    if (attempt.status === 429) limited = attempt;
+  }
+  ok('ops rate limit -> 429 within window', limited !== null);
+  const limitedBody = (await limited!.json()) as Record<string, any>;
+  ok('ops rate limit: RATE_LIMITED + Retry-After', limitedBody.code === 'RATE_LIMITED' && Number(limited!.headers.get('retry-after')) >= 1 && limitedBody.limit?.maxRequests === 3);
 
   // canonical path must NOT carry deprecation in warn mode
   const canonical = await fetch(`${s.base}/documents`, {
@@ -316,6 +412,7 @@ async function main() {
     PROOF_LEGACY_CREATE_MODE: 'warn',
     PROOF_SHARE_MARKDOWN_AUTH_MODE: 'api_key',
     PROOF_SHARE_MARKDOWN_API_KEY: 'test-direct-share-key',
+    PROOF_OPS_RATE_LIMIT_MAX: '3',
   });
   try {
     await warnAndApiKeyBattery(server);
