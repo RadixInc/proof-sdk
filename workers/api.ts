@@ -473,6 +473,29 @@ async function handleState(request: Request, env: ApiEnv, slug: string): Promise
   });
 }
 
+/**
+ * Ops probe (not part of AGENT_CONTRACT.md): asserts the stored projection
+ * matches a replay of the durable Yjs state. Same authorization as /state.
+ */
+async function handleProjectionHealth(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+): Promise<Response> {
+  const { state, role } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  if (!role) {
+    return json(
+      { success: false, error: 'Missing or invalid share token', code: 'UNAUTHORIZED' },
+      401,
+    );
+  }
+  const stub = env.DOCUMENT_DO.get(env.DOCUMENT_DO.idFromName(slug));
+  const health = await stub.getProjectionHealth();
+  if (!health) return json({ success: false, error: 'Document not found' }, 404);
+  return json({ success: true, ...health });
+}
+
 async function handleDocRead(request: Request, env: ApiEnv, slug: string): Promise<Response> {
   const { state, role } = await loadDocAndRole(request, env, slug);
   if (!state) return json({ error: 'Document not found' }, 404);
@@ -605,6 +628,11 @@ export async function handleApiRequest(
   );
   if (method === 'GET' && stateMatch) {
     return handleState(request, env, stateMatch[1]);
+  }
+
+  const healthMatch = path.match(/^\/documents\/([a-z0-9-]+)\/projection-health$/);
+  if (method === 'GET' && healthMatch) {
+    return handleProjectionHealth(request, env, healthMatch[1]);
   }
 
   const collabSessionMatch = path.match(

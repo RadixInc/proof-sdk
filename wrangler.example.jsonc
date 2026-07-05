@@ -54,6 +54,10 @@
     // anyone, which is for local `wrangler dev` only.
     // "ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
     // "ACCESS_AUD": "<YOUR_ACCESS_APP_AUD_TAG>",
+    // Durability tuning (issue #8). Every Yjs update is persisted
+    // synchronously; these control the derived-projection cadence.
+    // "PROOF_COLLAB_PERSIST_DEBOUNCE_MS": "250",  // projection persist debounce
+    // "PROOF_YJS_SNAPSHOT_EVERY_UPDATES": "100",  // snapshot + compact cadence
     "PROOF_DEV_MODE": "0"
   },
 

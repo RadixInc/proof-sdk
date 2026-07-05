@@ -19,6 +19,7 @@
     "test:worker-access": "tsx src/tests/worker-access-identity.test.ts",
     "test:conformance": "tsx src/tests/worker-conformance.test.ts",
     "test:collab-sync": "tsx src/tests/worker-collab-sync.test.ts",
+    "test:durability": "tsx src/tests/worker-durability.test.ts",
     "test:proof-sdk": "tsx src/tests/proof-sdk-agent-bridge-client.test.ts",
     "test:server-routes-share": "tsx src/tests/server-routes-and-share.test.ts",
     "demo:agent": "npm --workspace proof-example run demo:agent"
