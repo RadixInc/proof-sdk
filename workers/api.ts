@@ -746,11 +746,12 @@ async function handleOpenContext(
  * Y.Doc) when the op runs. The internal headers cannot be forged from
  * outside: this is the only path that reaches the DO's onRequest.
  */
-async function handleAgentOps(
+async function forwardToDocumentDo(
   request: Request,
   env: ApiEnv,
   slug: string,
   identity: Identity,
+  internalPath: string,
 ): Promise<Response> {
   const headers = new Headers({ 'content-type': 'application/json' });
   const presented = getPresentedSecret(request);
@@ -759,13 +760,18 @@ async function handleAgentOps(
     request.headers.get('idempotency-key') ?? request.headers.get('x-idempotency-key');
   if (idempotencyKey) headers.set('x-proof-idempotency-key', idempotencyKey);
   headers.set('x-proof-actor', JSON.stringify(identity));
+  const clientIp =
+    request.headers.get('cf-connecting-ip') ??
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    '';
+  if (clientIp) headers.set('x-proof-client-ip', clientIp);
   const stub = await getServerByName(
     env.DOCUMENT_DO as unknown as Parameters<typeof getServerByName>[0],
     slug,
   );
   return stub.fetch(
-    new Request('https://document-do/internal/ops', {
-      method: 'POST',
+    new Request(`https://document-do${internalPath}`, {
+      method: request.method === 'PUT' ? 'PUT' : 'POST',
       headers,
       body: await request.text(),
     }),
@@ -807,7 +813,12 @@ export async function handleApiRequest(
     path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/ops$/) ??
     path.match(/^\/api\/agent\/([a-z0-9-]+)\/ops$/);
   if (method === 'POST' && opsMatch) {
-    return handleAgentOps(request, env, opsMatch[1], _identity);
+    return forwardToDocumentDo(request, env, opsMatch[1], _identity, '/internal/ops');
+  }
+
+  const titleMatch = path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/title$/);
+  if (method === 'PUT' && titleMatch) {
+    return forwardToDocumentDo(request, env, titleMatch[1], _identity, '/internal/title');
   }
 
   const openContextMatch = path.match(
@@ -836,6 +847,9 @@ export async function handleApiRequest(
   const docMatch = path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)$/);
   if (method === 'GET' && docMatch) {
     return handleDocRead(request, env, docMatch[1]);
+  }
+  if (method === 'PUT' && docMatch) {
+    return forwardToDocumentDo(request, env, docMatch[1], _identity, '/internal/document');
   }
 
   return null;
