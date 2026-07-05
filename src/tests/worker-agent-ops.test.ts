@@ -229,26 +229,35 @@ async function main() {
     ok('all ten concurrent keystrokes present in order', finalText.includes('abcde') && finalText.includes('fghij'), finalText);
 
     // rewrite.apply (changes mode) while the human keeps editing elsewhere.
-    const preRewrite = await fetch(`${BASE}/documents/${slug}/state`, {
-      headers: { ...AGENT, 'x-share-token': token },
-    });
-    const preRevision = Number(((await preRewrite.json()) as any).revision);
+    // Live typing races the base revision: the server correctly answers
+    // 409 STALE_BASE with the latest revision, and the agent's move (per
+    // the response's retryWithState) is to refresh the base and retry —
+    // so the test does exactly that until the rewrite lands.
     const rewriteTyping = (async () => {
       for (const ch of 'klmno') {
         typeChar(ch);
         await sleep(30);
       }
     })();
-    const rewriteRes = await postOp(slug, token, {
-      type: 'rewrite.apply',
-      payload: {
-        by: 'ai:rewriter',
-        changes: [{ find: 'quick brown fox', replace: 'QUICK BROWN FOX' }],
-        baseRevision: preRevision,
-      },
-    });
+    let rewriteRes: Awaited<ReturnType<typeof postOp>> = { status: 0, body: {} };
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const stateRes = await fetch(`${BASE}/documents/${slug}/state`, {
+        headers: { ...AGENT, 'x-share-token': token },
+      });
+      const revision = Number(((await stateRes.json()) as any).revision);
+      rewriteRes = await postOp(slug, token, {
+        type: 'rewrite.apply',
+        payload: {
+          by: 'ai:rewriter',
+          changes: [{ find: 'quick brown fox', replace: 'QUICK BROWN FOX' }],
+          baseRevision: revision,
+        },
+      });
+      if (!(rewriteRes.status === 409 && rewriteRes.body.code === 'STALE_BASE')) break;
+      await sleep(150);
+    }
     await rewriteTyping;
-    ok('rewrite.apply during live typing -> 200', rewriteRes.status === 200, rewriteRes.body);
+    ok('rewrite.apply during live typing -> 200 (agent retries stale base)', rewriteRes.status === 200, rewriteRes.body);
     const rewriteConverged = await waitFor(() => {
       const text = human.doc.getXmlFragment('prosemirror').toString();
       return text.includes('QUICK BROWN FOX') && text.includes('klmno');
