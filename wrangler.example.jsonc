@@ -15,6 +15,17 @@
   // variables on each deploy; encrypted secrets persist regardless.
   "keep_vars": true,
 
+  // No public front door: the app is reached only through your custom domain
+  // behind Cloudflare Access. Declaring workers_dev here matters — when it is
+  // absent, every `wrangler deploy` re-enables the workers.dev route and
+  // overrides the dashboard toggle. Preview URLs stay on: they are the
+  // staging mechanism for non-production branches, and every sensitive route
+  // is still gated in-Worker (Access JWT or document token), so a preview
+  // hostname exposes only the static editor bundle — code this public repo
+  // already publishes.
+  "workers_dev": false,
+  "preview_urls": true,
+
   // The Vite build output (npm run build) served as static assets.
   "assets": {
     "directory": "./dist",
@@ -27,8 +38,10 @@
   },
 
   "vars": {
-    // Public origin of your deployment (behind your Access application).
-    "PROOF_PUBLIC_ORIGIN": "https://docs.example.com",
+    // Public base URL of your deployment (behind your Access application);
+    // used when building absolute share/token URLs in API responses. Falls
+    // back to the request origin when unset.
+    "PROOF_PUBLIC_BASE_URL": "https://docs.example.com",
     // Cloudflare Access (authentication — see the access-authn ADR).
     // REQUIRED for any deployed instance — uncomment and fill in. While
     // these are unset, only PROOF_DEV_MODE=1 (see .dev.vars.example) admits
