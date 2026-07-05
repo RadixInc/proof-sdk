@@ -32,6 +32,8 @@ jobs:
       - run: npm run test:human-identity
       # Agent ops: live mark propagation into connected editors.
       - run: npm run test:agent-ops
+      # Share lifecycle: pause/resume/revoke, epochs, token elevation.
+      - run: npm run test:share-lifecycle
 
   leak-scan:
     runs-on: ubuntu-latest
