@@ -10,6 +10,7 @@
  *   GET  /documents/:slug, /api/documents/:slug         — lenient doc read
  */
 
+import { getServerByName } from 'partyserver';
 import { canonicalizeStoredMarks } from '../src/formats/marks';
 import type { Identity } from './access';
 import { resolveCollabSigningSecret, signCollabToken } from './collab-token';
@@ -735,6 +736,43 @@ async function handleOpenContext(
 }
 
 // ---------------------------------------------------------------------------
+// Agent ops (issue #10)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ops execute inside the document DO (single serialized writer). The Worker
+ * verifies edge identity, pre-hashes the presented document token, and
+ * forwards through partyserver fetch so the DO is fully initialized (live
+ * Y.Doc) when the op runs. The internal headers cannot be forged from
+ * outside: this is the only path that reaches the DO's onRequest.
+ */
+async function handleAgentOps(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+  identity: Identity,
+): Promise<Response> {
+  const headers = new Headers({ 'content-type': 'application/json' });
+  const presented = getPresentedSecret(request);
+  if (presented) headers.set('x-proof-secret-hash', await hashSecret(presented));
+  const idempotencyKey =
+    request.headers.get('idempotency-key') ?? request.headers.get('x-idempotency-key');
+  if (idempotencyKey) headers.set('x-proof-idempotency-key', idempotencyKey);
+  headers.set('x-proof-actor', JSON.stringify(identity));
+  const stub = await getServerByName(
+    env.DOCUMENT_DO as unknown as Parameters<typeof getServerByName>[0],
+    slug,
+  );
+  return stub.fetch(
+    new Request('https://document-do/internal/ops', {
+      method: 'POST',
+      headers,
+      body: await request.text(),
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -763,6 +801,13 @@ export async function handleApiRequest(
   );
   if (method === 'GET' && stateMatch) {
     return handleState(request, env, stateMatch[1]);
+  }
+
+  const opsMatch =
+    path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/ops$/) ??
+    path.match(/^\/api\/agent\/([a-z0-9-]+)\/ops$/);
+  if (method === 'POST' && opsMatch) {
+    return handleAgentOps(request, env, opsMatch[1], _identity);
   }
 
   const openContextMatch = path.match(

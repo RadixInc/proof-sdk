@@ -30,6 +30,8 @@ jobs:
       - run: npm run test:durability
       # Human identity: SSO default role, open-context, session identity.
       - run: npm run test:human-identity
+      # Agent ops: live mark propagation into connected editors.
+      - run: npm run test:agent-ops
 
   leak-scan:
     runs-on: ubuntu-latest

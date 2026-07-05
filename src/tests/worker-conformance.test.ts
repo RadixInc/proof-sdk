@@ -16,11 +16,10 @@ import { applyLocalMigrations, finish, startWorker } from './worker-harness';
 import type { WorkerHandle } from './worker-harness';
 
 const SKIPPED_SURFACES: Array<{ surface: string; reason: string }> = [
-  { surface: 'POST /documents/:slug/ops (+ bridge comment/suggestion routes)', reason: 'lands with issue #10/#11' },
+  { surface: '/ops write ops (suggestion.accept/reject, rewrite.apply)', reason: 'lands with issue #11' },
   { surface: 'GET /documents/:slug/events/pending + POST events/ack', reason: 'lands with issue #12' },
   { surface: 'POST /documents/:slug/presence', reason: 'lands with issue #7 (collab)' },
   { surface: 'PUT /documents/:slug, PUT /documents/:slug/title', reason: 'lands with issue #10/#11' },
-  { surface: '/d/:slug web routes + content negotiation', reason: 'lands with issue #9' },
   { surface: 'direct-share per-IP rate limiting (429 + Retry-After)', reason: 'DO-based limiter, issue #11' },
   { surface: 'OG card rendering', reason: 'deleted by design — see VISION.md anti-goals' },
 ];
@@ -93,6 +92,110 @@ async function baseBattery(s: Server) {
   ok('GET /api/documents/:slug -> 200', lenient.status === 200);
   const lenientBody = (await lenient.json()) as Record<string, any>;
   ok('lenient read: markdown + shareState', String(lenientBody.markdown).includes('Conformance body') && lenientBody.shareState === 'ACTIVE');
+
+  // --- POST /documents/:slug/ops — agent mark ops (issue #10)
+  const opsUrl = `${s.base}/documents/${doc.slug}/ops`;
+  const opHeaders = { ...JSON_HDRS, 'x-share-token': doc.accessToken };
+  const commentBody = JSON.stringify({
+    type: 'comment.add',
+    payload: { by: 'ai:conformance', text: 'Looks good', quote: 'Conformance body' },
+  });
+  const commentRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: { ...opHeaders, 'idempotency-key': 'conf-comment-1' },
+    body: commentBody,
+  });
+  ok('ops comment.add -> 200', commentRes.status === 200, commentRes.status);
+  const comment = (await commentRes.json()) as Record<string, any>;
+  ok('ops comment.add: markId + eventId', typeof comment.markId === 'string' && Number.isFinite(comment.eventId));
+  ok('ops comment.add: mark stored with quote', comment.marks?.[comment.markId]?.kind === 'comment' && String(comment.marks[comment.markId].quote).includes('Conformance body'), comment.marks);
+
+  const replayRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: { ...opHeaders, 'idempotency-key': 'conf-comment-1' },
+    body: commentBody,
+  });
+  const replay = (await replayRes.json()) as Record<string, any>;
+  ok('ops idempotent replay -> same markId, no double-apply', replayRes.status === 200 && replay.markId === comment.markId && Object.keys(replay.marks).length === Object.keys(comment.marks).length, replay);
+
+  const reusedRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: { ...opHeaders, 'idempotency-key': 'conf-comment-1' },
+    body: JSON.stringify({ type: 'comment.add', payload: { by: 'ai:x', text: 'different', quote: 'Conformance body' } }),
+  });
+  ok('ops idempotency key reuse with new body -> 409 IDEMPOTENCY_KEY_REUSED', reusedRes.status === 409 && ((await reusedRes.json()) as any).code === 'IDEMPOTENCY_KEY_REUSED');
+
+  const replyRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'comment.reply', payload: { markId: comment.markId, by: 'ai:conformance', text: 'follow-up' } }),
+  });
+  const reply = (await replyRes.json()) as Record<string, any>;
+  ok('ops comment.reply -> 200 + thread grows', replyRes.status === 200 && Array.isArray(reply.marks[comment.markId].thread) && reply.marks[comment.markId].thread.length === 1, reply.marks?.[comment.markId]);
+
+  const resolveRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'comment.resolve', payload: { markId: comment.markId } }),
+  });
+  const resolveBody = (await resolveRes.json()) as Record<string, any>;
+  ok('ops comment.resolve -> 200 + resolved flag', resolveRes.status === 200 && resolveBody.marks[comment.markId].resolved === true);
+
+  const suggestRes = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({
+      type: 'suggestion.add',
+      payload: { kind: 'replace', by: 'ai:conformance', quote: 'Conformance body', content: 'Improved body' },
+    }),
+  });
+  const suggest = (await suggestRes.json()) as Record<string, any>;
+  ok('ops suggestion.add -> 200 pending mark', suggestRes.status === 200 && suggest.marks[suggest.markId].status === 'pending' && suggest.marks[suggest.markId].content === 'Improved body', suggest.marks?.[suggest.markId]);
+
+  const badAnchor = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'comment.add', payload: { by: 'ai:x', text: 'hm', quote: 'text that is definitely not present' } }),
+  });
+  const badAnchorBody = (await badAnchor.json()) as Record<string, any>;
+  ok('ops unresolvable anchor -> 409 ANCHOR_NOT_FOUND + nextSteps', badAnchor.status === 409 && badAnchorBody.code === 'ANCHOR_NOT_FOUND' && Array.isArray(badAnchorBody.nextSteps));
+
+  const noType = await fetch(opsUrl, { method: 'POST', headers: opHeaders, body: JSON.stringify({ payload: {} }) });
+  ok('ops missing type -> 400', noType.status === 400 && String(((await noType.json()) as any).error).includes('Missing operation type'));
+
+  const noTokOps = await fetch(opsUrl, {
+    method: 'POST',
+    headers: JSON_HDRS,
+    body: JSON.stringify({ type: 'comment.add', payload: { by: 'ai:x', text: 'x', quote: 'Conformance body' } }),
+  });
+  ok('ops without token -> 401', noTokOps.status === 401);
+
+  const agentAlias = await fetch(`${s.base}/api/agent/${doc.slug}/ops`, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'comment.add', payload: { by: 'ai:alias', text: 'via alias', quote: 'Conformance body' } }),
+  });
+  ok('POST /api/agent/:slug/ops alias -> 200', agentAlias.status === 200);
+
+  const notImplemented = await fetch(opsUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ type: 'suggestion.accept', payload: { markId: suggest.markId } }),
+  });
+  ok('ops write ops staged for #11 -> 501 OP_NOT_IMPLEMENTED', notImplemented.status === 501 && ((await notImplemented.json()) as any).code === 'OP_NOT_IMPLEMENTED');
+
+  const viewerShare = await fetch(`${s.base}/share/markdown`, {
+    method: 'POST',
+    headers: JSON_HDRS,
+    body: JSON.stringify({ markdown: '# Viewer\n\nviewer body', role: 'viewer' }),
+  });
+  const viewerShareDoc = (await viewerShare.json()) as Record<string, any>;
+  const viewerOp = await fetch(`${s.base}/documents/${viewerShareDoc.slug}/ops`, {
+    method: 'POST',
+    headers: { ...JSON_HDRS, 'x-share-token': viewerShareDoc.accessToken },
+    body: JSON.stringify({ type: 'comment.add', payload: { by: 'ai:x', text: 'nope', quote: 'viewer body' } }),
+  });
+  ok('ops with viewer role -> 403 insufficient role', viewerOp.status === 403);
 
   // --- POST /share/markdown JSON (upstream L545, L1669)
   const shareRes = await fetch(`${s.base}/share/markdown`, {
