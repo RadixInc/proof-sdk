@@ -45,6 +45,7 @@ import { canonicalizeStoredMarks } from '../src/formats/marks';
 import type { CommentReply, StoredMark } from '../src/formats/marks';
 import {
   authorizeDocumentOp,
+  authorizePresence,
   buildImplicitLegacyTarget,
   parseDocumentOp,
   parseOpAddressing,
@@ -52,6 +53,10 @@ import {
   stripAuthoredMarks,
   validateRewritePayload,
 } from './ops';
+import {
+  deriveAgentNameFromId,
+  normalizeAgentScopedId,
+} from '../src/shared/agent-identity';
 import type { DocumentOpType, OpStoredMark } from './ops';
 import {
   buildAcceptedSuggestionMarkdownFromSelection,
@@ -592,6 +597,16 @@ export class DocumentDO extends YServer {
     if (request.method === 'PUT' && url.pathname === '/internal/title') {
       return this.runSerialized(() => this.handlePutTitle(request));
     }
+    if (request.method === 'POST' && url.pathname === '/internal/presence') {
+      const limited = this.checkOpsRateLimit(
+        request.headers.get('x-proof-client-ip') || 'unknown',
+      );
+      if (limited) return limited;
+      return this.runSerialized(() => this.handlePresenceRequest(request, 'announce'));
+    }
+    if (request.method === 'POST' && url.pathname === '/internal/presence/disconnect') {
+      return this.runSerialized(() => this.handlePresenceRequest(request, 'disconnect'));
+    }
     return Response.json({ success: false, error: 'Not found' }, { status: 404 });
   }
 
@@ -731,6 +746,114 @@ export class DocumentDO extends YServer {
       }
     }
     return { actor: 'ai:unknown', operator: null };
+  }
+
+  /**
+   * Agent HTTP presence (issue #40): a lightweight heartbeat for headless
+   * agents that have no Yjs client. Writes the same `agentPresence` Y.Map
+   * the browser editor already consumes, so propagation to connected
+   * clients is ordinary Yjs sync — no new broadcast mechanism. TTL is
+   * client-interpreted (the editor expires entries after 60s); the server
+   * only prunes long-dead entries on write so the map stays bounded.
+   */
+  private async handlePresenceRequest(
+    request: Request,
+    mode: 'announce' | 'disconnect',
+  ): Promise<Response> {
+    const doc = this.row();
+    if (!doc) {
+      return Response.json(
+        { success: false, error: 'Document not found' },
+        { status: 404 },
+      );
+    }
+    const role = await this.resolveRole(request.headers.get('x-proof-secret-hash'));
+    const denied = authorizePresence(role, String(doc.share_state));
+    if (denied) return Response.json(denied.body, { status: denied.status });
+
+    let body: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(await request.text()) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // empty body is fine for announce; agentId can come from identity
+    }
+
+    // Prefer the self-declared body agentId (upstream contract shape);
+    // fall back to the verified identity's agent actor so a delegated or
+    // service-token agent can announce with an empty body. An explicitly
+    // provided but invalid agentId is an error — silently renaming the
+    // caller to its identity-derived id would misattribute presence.
+    const identity = this.deriveOpIdentity(request);
+    const bodyAgentIdProvided =
+      typeof body.agentId === 'string' && body.agentId.trim().length > 0;
+    const fromBody = normalizeAgentScopedId(body.agentId);
+    if (bodyAgentIdProvided && !fromBody) {
+      return Response.json(
+        {
+          success: false,
+          error: 'agentId must be agent-scoped (e.g. "my-agent" or "ai:my-agent")',
+        },
+        { status: 400 },
+      );
+    }
+    const fromIdentity = identity.actor.startsWith('ai:')
+      ? normalizeAgentScopedId(identity.actor)
+      : null;
+    const id = fromBody ?? fromIdentity;
+    if (!id) {
+      return Response.json(
+        {
+          success: false,
+          error: 'agentId is required (agent-scoped, e.g. "my-agent" or "ai:my-agent")',
+        },
+        { status: 400 },
+      );
+    }
+
+    const presenceMap = this.document.getMap('agentPresence');
+
+    if (mode === 'disconnect') {
+      this.document.transact(() => {
+        presenceMap.delete(id);
+      }, 'agent-op');
+      return Response.json({ success: true, disconnected: true, agentId: id });
+    }
+
+    const clamp = (value: unknown, max: number): string | null => {
+      if (typeof value !== 'string') return null;
+      const trimmed = value.trim();
+      return trimmed ? trimmed.slice(0, max) : null;
+    };
+    const now = new Date().toISOString();
+    const entry: Record<string, unknown> = {
+      id,
+      name: clamp(body.name, 80) ?? deriveAgentNameFromId(id),
+      status: clamp(body.status, 32) ?? 'active',
+      at: now,
+      ...(clamp(body.avatar, 200) ? { avatar: clamp(body.avatar, 200) } : {}),
+      // Additive Operator provenance (delegated agents), matching events
+      // and marks (ADR: delegated-agent-identity-operator-provenance).
+      ...(identity.operator ? { operator: identity.operator } : {}),
+    };
+
+    const pruneBefore = Date.now() - 5 * 60_000;
+    this.document.transact(() => {
+      // Bound the map: drop entries whose heartbeat is long past the
+      // client's 60s display TTL.
+      for (const [key, value] of presenceMap.entries()) {
+        const at = (value as Record<string, unknown> | null)?.at;
+        const parsed = typeof at === 'string' ? Date.parse(at) : NaN;
+        if (Number.isFinite(parsed) && parsed < pruneBefore) {
+          presenceMap.delete(key);
+        }
+      }
+      presenceMap.set(id, entry);
+    }, 'agent-op');
+
+    return Response.json({ success: true, presence: entry });
   }
 
   /**

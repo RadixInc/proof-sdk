@@ -1104,6 +1104,21 @@ export async function handleApiRequest(
     return forwardToDocumentDo(request, env, opsMatch[1], _identity, '/internal/ops');
   }
 
+  // Agent HTTP presence heartbeat (issue #40). The disconnect variant is
+  // what src/bridge/share-client.ts's disconnectAgentPresence calls.
+  const presenceMatch =
+    path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/presence(\/disconnect)?$/) ??
+    path.match(/^\/api\/agent\/([a-z0-9-]+)\/presence(\/disconnect)?$/);
+  if (method === 'POST' && presenceMatch) {
+    return forwardToDocumentDo(
+      request,
+      env,
+      presenceMatch[1],
+      _identity,
+      presenceMatch[2] ? '/internal/presence/disconnect' : '/internal/presence',
+    );
+  }
+
   // Bug-report bridge (issue #16): plain-fetch filing to the configured
   // repo. Upstream mounted these under both /api/agent and /documents.
   const bugReportMatch = path.match(/^\/(?:api\/agent|documents)\/bug-reports$/);
