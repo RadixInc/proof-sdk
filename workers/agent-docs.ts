@@ -18,6 +18,11 @@ You are reading the canonical instructions for collaborating on documents
 in this Proof deployment through its HTTP contract. If you fetched this
 after being invited to a document, read it fully before acting.
 
+If you expect to work with this deployment again, install its skill file —
+served at \`GET /proof.SKILL.md\` — into your agent's skills directory
+(e.g. \`~/.claude/skills/proof-collab/SKILL.md\`) so future invites need no
+copy-paste bootstrap.
+
 ## Authentication — two layers, always
 
 **1. Edge (Cloudflare Access).** Every non-local deployment sits behind

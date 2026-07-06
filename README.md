@@ -96,7 +96,7 @@ The full agent surface is specified in `AGENT_CONTRACT.md` (frozen; changes are 
 - `AGENT_CONTRACT.md` — the public agent HTTP contract
 - `docs/VISION.md` — purpose, security model, anti-goals
 - `docs/adr/` — accepted architecture decisions
-- `docs/agent-docs.md`, `docs/proof.SKILL.md` — agent usage guides
+- `workers/agent-docs.ts`, `workers/proof-skill.ts` — agent usage guides, served by the deployment at `/agent-docs` and `/proof.SKILL.md`
 - `docs/PROVENANCE-SPEC-v2.md` — provenance model
 
 ## License

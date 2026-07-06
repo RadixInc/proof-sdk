@@ -125,6 +125,9 @@ case the agent declares itself:
   string formats (`ai:<agentId>`, `human:<email>`) are unchanged.
 - `GET /agent-docs` — serves the deployment's canonical agent
   instructions (markdown), including its edge-auth specifics.
+- `GET /proof.SKILL.md` — serves an installable, self-contained agent
+  skill file (markdown with frontmatter) teaching the auth bootstrap and
+  deferring to `/agent-docs` for behavior.
 
 ## Minimal Agent Flow
 
