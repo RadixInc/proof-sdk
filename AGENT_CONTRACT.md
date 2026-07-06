@@ -2,6 +2,9 @@
 
 This contract defines the public Proof SDK flow for creating and operating on shared documents over HTTP.
 
+> **Maintenance:** changes here (new routes, op types, or response fields) must be reflected in
+> `.claude/skills/proof-docs/SKILL.md`, the client skill built against this contract.
+
 ## Endpoints
 
 Canonical route:
