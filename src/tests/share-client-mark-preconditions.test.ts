@@ -19,7 +19,6 @@ async function run(): Promise<void> {
   const originalWindow = (globalThis as { window?: unknown }).window;
 
   const requests: FetchRecord[] = [];
-  let stateReads = 0;
 
   (globalThis as { window: Record<string, unknown> }).window = {
     location: new URL('https://proof-web-staging.up.railway.app/d/test-doc?token=share-token'),
@@ -38,36 +37,9 @@ async function run(): Promise<void> {
     const body = bodyText ? JSON.parse(bodyText) as Record<string, unknown> : null;
     requests.push({ path: url.pathname, method, headers, body });
 
-    if (url.pathname === '/api/agent/test-doc/state') {
-      stateReads += 1;
-      if (stateReads === 1) {
-        return jsonResponse({
-          mutationBase: {
-            token: 'mt1:test-token-1',
-            source: 'persisted_yjs',
-            schemaVersion: 'mt1',
-          },
-          revision: 41,
-          updatedAt: '2026-03-06T00:00:01.000Z',
-        });
-      }
-      if (stateReads === 2) {
-        return jsonResponse({
-          mutationReady: false,
-          readSource: 'yjs_fallback',
-          updatedAt: null,
-          revision: null,
-        });
-      }
-      if (stateReads === 3) {
-        return jsonResponse({ updatedAt: '2026-03-06T00:00:00.000Z' });
-      }
-      return jsonResponse({ revision: 40 + stateReads, updatedAt: `2026-03-06T00:00:0${stateReads}.000Z` });
+    if (url.pathname === '/api/agent/test-doc/ops') {
+      return jsonResponse({ success: true, markId: (body?.payload as Record<string, unknown> | undefined)?.markId, marks: {} });
     }
-    if (url.pathname === '/api/agent/test-doc/marks/accept') return jsonResponse({ success: true, marks: {} });
-    if (url.pathname === '/api/agent/test-doc/marks/reject') return jsonResponse({ success: true, marks: {} });
-    if (url.pathname === '/api/agent/test-doc/marks/resolve') return jsonResponse({ success: true, marks: {} });
-    if (url.pathname === '/api/agent/test-doc/marks/unresolve') return jsonResponse({ success: true, marks: {} });
     throw new Error(`Unexpected request path: ${url.pathname}`);
   };
 
@@ -86,24 +58,23 @@ async function run(): Promise<void> {
     const unresolve = await shareClient.unresolveComment('mark-unresolve', 'human:editor');
     assert.equal((unresolve && 'error' in unresolve) ? false : unresolve?.success, true, 'unresolveComment should succeed');
 
-    const acceptRequest = requests.find((request) => request.path === '/api/agent/test-doc/marks/accept');
-    assert.equal(acceptRequest?.body?.baseToken, 'mt1:test-token-1', 'acceptSuggestion should prefer baseToken from /state');
+    // All four mutations route through the ops envelope (AGENT_CONTRACT.md)
+    // rather than a dedicated REST route — there is no server-side handler
+    // for /agent/:slug/marks/* paths.
+    const opsRequests = requests.filter((request) => request.path === '/api/agent/test-doc/ops');
+    assert.equal(opsRequests.length, 4, 'all four mutations should submit through /ops');
 
-    const rejectRequest = requests.find((request) => request.path === '/api/agent/test-doc/marks/reject');
-    assert.equal(
-      rejectRequest?.body?.baseUpdatedAt,
-      '2026-03-06T00:00:00.000Z',
-      'rejectSuggestion should retry stale /state reads and fall back to baseUpdatedAt when revision is unavailable',
-    );
+    const acceptRequest = opsRequests.find((request) => (request.body?.payload as Record<string, unknown> | undefined)?.markId === 'mark-accept');
+    assert.equal(acceptRequest?.body?.type, 'suggestion.accept', 'acceptSuggestion should submit a suggestion.accept op');
 
-    const resolveRequest = requests.find((request) => request.path === '/api/agent/test-doc/marks/resolve');
-    assert.equal(resolveRequest?.body?.baseRevision, 44, 'resolveComment should include baseRevision from /state');
+    const rejectRequest = opsRequests.find((request) => (request.body?.payload as Record<string, unknown> | undefined)?.markId === 'mark-reject');
+    assert.equal(rejectRequest?.body?.type, 'suggestion.reject', 'rejectSuggestion should submit a suggestion.reject op');
 
-    const unresolveRequest = requests.find((request) => request.path === '/api/agent/test-doc/marks/unresolve');
-    assert.equal(unresolveRequest?.body?.baseRevision, 45, 'unresolveComment should include baseRevision from /state');
+    const resolveRequest = opsRequests.find((request) => (request.body?.payload as Record<string, unknown> | undefined)?.markId === 'mark-resolve');
+    assert.equal(resolveRequest?.body?.type, 'comment.resolve', 'resolveComment should submit a comment.resolve op');
 
-    const stateRequestCount = requests.filter((request) => request.path === '/api/agent/test-doc/state').length;
-    assert.equal(stateRequestCount, 5, 'stale /state reads should be retried until a usable mutation base is available');
+    const unresolveRequest = opsRequests.find((request) => (request.body?.payload as Record<string, unknown> | undefined)?.markId === 'mark-unresolve');
+    assert.equal(unresolveRequest?.body?.type, 'comment.unresolve', 'unresolveComment should submit a comment.unresolve op');
 
     console.log('share-client-mark-preconditions.test.ts passed');
   } finally {
