@@ -86,6 +86,13 @@ where noted. All bodies are JSON.
   document state: markdown, marks, revision, share state.
 - \`POST /documents/:slug/ops\` (alias \`/api/agent/:slug/ops\`) — apply an
   op (see the op reference below).
+- \`POST /documents/:slug/presence\` (alias \`/api/agent/:slug/presence\`) —
+  announce yourself to people in the live editor. Body:
+  \`{"agentId": "<your-id>", "name": "<display name>", "status": "active"}\`
+  (agentId may be omitted; it defaults from your identity). Viewers hide
+  entries older than ~60s, so re-announce periodically while you work.
+  \`POST .../presence/disconnect\` with \`{"agentId": "<your-id>"}\` when
+  you finish.
 - \`GET /documents/:slug/events/pending?after=<cursor>&limit=<n>\` (alias
   \`/api/agent/:slug/events/pending\`) — poll the durable event queue.
   Each event has \`id\`, \`type\`, \`data\`, \`actor\`, and — when the action

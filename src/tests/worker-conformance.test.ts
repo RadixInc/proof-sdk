@@ -16,7 +16,6 @@ import { applyLocalMigrations, finish, startWorker } from './worker-harness';
 import type { WorkerHandle } from './worker-harness';
 
 const SKIPPED_SURFACES: Array<{ surface: string; reason: string }> = [
-  { surface: 'POST /documents/:slug/presence', reason: 'lands with issue #7 (collab)' },
   { surface: 'direct-share (create) per-IP rate limiting', reason: 'needs a cross-document limiter; ops mutation rate limiting shipped in #11' },
   { surface: 'OG card rendering', reason: 'deleted by design — see VISION.md anti-goals' },
 ];
@@ -324,6 +323,68 @@ async function baseBattery(s: Server) {
     body: JSON.stringify({ upToId: -3 }),
   });
   ok('events/ack invalid upToId -> 400', badAck.status === 400);
+
+  // --- POST /documents/:slug/presence — agent HTTP heartbeat (issue #40)
+  const presenceUrl = `${s.base}/documents/${doc.slug}/presence`;
+  const presenceRes = await fetch(presenceUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ agentId: 'conformance-presence', name: 'Conformance Agent', status: 'active' }),
+  });
+  ok('POST presence -> 200', presenceRes.status === 200, presenceRes.status);
+  const presence = (await presenceRes.json()) as Record<string, any>;
+  ok(
+    'presence: bare agentId normalized to agent scope + shape echoed',
+    presence.success === true &&
+      presence.presence?.id === 'ai:conformance-presence' &&
+      presence.presence?.name === 'Conformance Agent' &&
+      presence.presence?.status === 'active' &&
+      Number.isFinite(Date.parse(presence.presence?.at)),
+    presence,
+  );
+  const presenceDefaults = await fetch(presenceUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ agentId: 'ai:defaults-check' }),
+  });
+  const presenceDefaultsBody = (await presenceDefaults.json()) as Record<string, any>;
+  ok(
+    'presence: name/status defaults applied',
+    presenceDefaults.status === 200 &&
+      presenceDefaultsBody.presence?.status === 'active' &&
+      typeof presenceDefaultsBody.presence?.name === 'string' &&
+      presenceDefaultsBody.presence.name.length > 0,
+    presenceDefaultsBody,
+  );
+  const presenceNoTok = await fetch(presenceUrl, {
+    method: 'POST',
+    headers: JSON_HDRS,
+    body: JSON.stringify({ agentId: 'nope' }),
+  });
+  ok('presence without token -> 401', presenceNoTok.status === 401);
+  const presenceHumanId = await fetch(presenceUrl, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ agentId: 'human:someone@example.com' }),
+  });
+  ok('presence rejects human-scoped agentId -> 400', presenceHumanId.status === 400);
+  const presenceAlias = await fetch(`${s.base}/api/agent/${doc.slug}/presence`, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ agentId: 'alias-check' }),
+  });
+  ok('POST /api/agent/:slug/presence alias -> 200', presenceAlias.status === 200);
+  const disconnectRes = await fetch(`${s.base}/api/agent/${doc.slug}/presence/disconnect`, {
+    method: 'POST',
+    headers: opHeaders,
+    body: JSON.stringify({ agentId: 'conformance-presence' }),
+  });
+  const disconnect = (await disconnectRes.json()) as Record<string, any>;
+  ok(
+    'presence/disconnect -> 200 disconnected (share-client contract)',
+    disconnectRes.status === 200 && disconnect.success === true && disconnect.disconnected === true,
+    disconnect,
+  );
 
   // --- POST /share/markdown JSON (upstream L545, L1669)
   const shareRes = await fetch(`${s.base}/share/markdown`, {

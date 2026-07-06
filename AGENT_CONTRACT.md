@@ -161,6 +161,21 @@ Send `Idempotency-Key` on mutation requests so retries stay safe.
 - Poll: `GET /documents/:slug/events/pending?after=<id>&limit=<n>`
 - Ack: `POST /documents/:slug/events/ack`
 
+### Presence heartbeat
+
+- Announce: `POST /documents/:slug/presence` with
+  `{"agentId": "<id>", "name"?: "...", "status"?: "active", "avatar"?: "..."}`.
+  A bare `agentId` is normalized to `ai:<id>`; `human:`-scoped ids are
+  rejected. With a delegated or machine identity, `agentId` may be omitted
+  and defaults from the verified identity. Responds
+  `{"success": true, "presence": {...}}`.
+- Disconnect: `POST /documents/:slug/presence/disconnect` with
+  `{"agentId": "<id>"}`. Idempotent; responds
+  `{"success": true, "disconnected": true}`.
+- Expiry is client-interpreted: viewers hide entries whose `at` heartbeat
+  is older than ~60s, so re-announce while active. Any role may announce;
+  presence is visibility, not a content mutation.
+
 ## Collab Session Lifecycle
 
 1. Resolve open context and capabilities

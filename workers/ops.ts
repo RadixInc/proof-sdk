@@ -214,6 +214,48 @@ export function authorizeDocumentOp(
   return null;
 }
 
+/**
+ * Presence gate (issue #40): same lifecycle-state semantics as document
+ * ops, but any resolved role may announce presence — it is visibility,
+ * not a content mutation.
+ */
+export function authorizePresence(
+  role: ResolvedRole | null,
+  shareState: string,
+): { status: number; body: Record<string, unknown> } | null {
+  if (shareState === 'DELETED') {
+    return { status: 410, body: { success: false, error: 'Document deleted' } };
+  }
+  if (shareState === 'REVOKED' && role !== 'owner_bot') {
+    return {
+      status: 403,
+      body: { success: false, error: 'Document access has been revoked' },
+    };
+  }
+  if (!role) {
+    return {
+      status: 401,
+      body: {
+        success: false,
+        error: 'Missing or invalid share token',
+        code: 'UNAUTHORIZED',
+        acceptedHeaders: [
+          'x-share-token: <ACCESS_TOKEN>',
+          'x-bridge-token: <OWNER_SECRET>',
+          'Authorization: Bearer <TOKEN>',
+        ],
+      },
+    };
+  }
+  if (role !== 'owner_bot' && shareState !== 'ACTIVE') {
+    return {
+      status: 403,
+      body: { success: false, error: 'Document is paused' },
+    };
+  }
+  return null;
+}
+
 /** Port of the engine's parseAnchorTarget (server/document-engine.ts). */
 export function parseAnchorTarget(
   raw: unknown,

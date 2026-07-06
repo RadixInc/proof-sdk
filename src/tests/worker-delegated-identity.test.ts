@@ -153,6 +153,31 @@ async function main() {
     ok('autonomous event actor is ai:<serviceTokenId>', autonomousEvent?.actor === 'ai:ci-bot', autonomousEvent);
     ok('autonomous event has no operator key', !!autonomousEvent && !('operator' in autonomousEvent), autonomousEvent);
 
+    // Presence announced by a delegated agent records the Operator and can
+    // default its id from the verified identity (empty body).
+    const delegatedPresence = await fetch(`${BASE}/documents/${slug}/presence`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-share-token': token,
+        'x-dev-identity': OPERATOR_EMAIL,
+        'x-agent-id': 'claude-code',
+      },
+      body: JSON.stringify({}),
+    });
+    const delegatedPresenceBody = (await delegatedPresence.json()) as Record<string, any>;
+    ok('delegated presence -> 200', delegatedPresence.status === 200, delegatedPresenceBody);
+    ok(
+      'delegated presence id defaults from identity',
+      delegatedPresenceBody.presence?.id === 'ai:claude-code',
+      delegatedPresenceBody,
+    );
+    ok(
+      'delegated presence records operator',
+      delegatedPresenceBody.presence?.operator === OPERATOR_EMAIL,
+      delegatedPresenceBody,
+    );
+
     // Editor boot response declares the deployment's edge-auth story.
     const openRes = await fetch(`${BASE}/documents/${slug}/open-context`, {
       headers: { 'x-dev-identity': OPERATOR_EMAIL, 'x-share-token': token },

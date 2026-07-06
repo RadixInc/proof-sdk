@@ -149,6 +149,41 @@ async function main() {
     const liveSuggestion = liveMarks.get(suggestionId) as Record<string, any>;
     ok('suggestion is pending replace with content', liveSuggestion.status === 'pending' && liveSuggestion.kind === 'replace' && liveSuggestion.content === 'sleepy dog', liveSuggestion);
 
+    // Agent HTTP presence heartbeat propagates live to the connected
+    // client's agentPresence Y.Map over ordinary Yjs sync (issue #40).
+    const livePresence = human.doc.getMap('agentPresence');
+    const presenceRes = await fetch(`${BASE}/documents/${slug}/presence`, {
+      method: 'POST',
+      headers: { ...JSON_HDRS, 'x-share-token': token },
+      body: JSON.stringify({ agentId: 'ops-presence', name: 'Ops Presence', status: 'active' }),
+    });
+    ok('presence heartbeat -> 200', presenceRes.status === 200, presenceRes.status);
+    ok(
+      'human client sees agent presence live',
+      await waitFor(() => livePresence.has('ai:ops-presence')),
+      [...livePresence.keys()],
+    );
+    const presenceEntry = livePresence.get('ai:ops-presence') as Record<string, any>;
+    ok(
+      'live presence entry matches client-consumed shape',
+      presenceEntry?.id === 'ai:ops-presence' &&
+        presenceEntry?.name === 'Ops Presence' &&
+        presenceEntry?.status === 'active' &&
+        typeof presenceEntry?.at === 'string',
+      presenceEntry,
+    );
+    const disconnectRes = await fetch(`${BASE}/api/agent/${slug}/presence/disconnect`, {
+      method: 'POST',
+      headers: { ...JSON_HDRS, 'x-share-token': token },
+      body: JSON.stringify({ agentId: 'ops-presence' }),
+    });
+    ok('presence disconnect -> 200', disconnectRes.status === 200);
+    ok(
+      'human client sees presence removal live',
+      await waitFor(() => !livePresence.has('ai:ops-presence')),
+      [...livePresence.keys()],
+    );
+
     // Anchor resolution sees fresh collab edits: type a new paragraph live,
     // then anchor a comment to it.
     human.doc.transact(() => {
