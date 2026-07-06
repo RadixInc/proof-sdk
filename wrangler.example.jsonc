@@ -44,10 +44,17 @@
   },
 
   "vars": {
-    // Public base URL of your deployment (behind your Access application);
-    // used when building absolute share/token URLs in API responses. Falls
-    // back to the request origin when unset.
-    "PROOF_PUBLIC_BASE_URL": "https://docs.example.com",
+    // Public base URL of your deployment, used when building absolute
+    // share/token URLs (including the collab WebSocket URL) in API
+    // responses. Optional — falls back to the request's own origin when
+    // unset, which is correct for the common case of a single custom
+    // domain routed straight to the Worker. Only set this (as a dashboard
+    // variable, never committed) if a fronting proxy/CDN changes the Host
+    // the Worker sees. Leave this commented out: wrangler deploy treats
+    // any value present here as config-declared and will overwrite the
+    // dashboard variable with it (or with this placeholder) on every
+    // deploy — keep_vars does not protect vars declared in this file.
+    // "PROOF_PUBLIC_BASE_URL": "https://docs.example.com",
     // Cloudflare Access (authentication — see the access-authn ADR).
     // REQUIRED for any deployed instance — uncomment and fill in. While
     // these are unset, only PROOF_DEV_MODE=1 (see .dev.vars.example) admits
