@@ -62,6 +62,17 @@ export function isShareRole(v: unknown): v is ShareRole {
 }
 
 /**
+ * Instance-wide default role for tokenless SSO humans (access-authn ADR):
+ * Access already authenticated them, so a clean /d/:slug link grants this
+ * role on ACTIVE documents. Agents never get a default role — their access
+ * stays document-token-gated (unchanged contract behavior).
+ */
+export function resolveDefaultHumanRole(env: { PROOF_DEFAULT_HUMAN_ROLE?: string }): ShareRole {
+  const value = env.PROOF_DEFAULT_HUMAN_ROLE?.trim();
+  return isShareRole(value) ? value : 'editor';
+}
+
+/**
  * Public base URL, matching upstream server/public-base-url.ts precedence:
  * trusted proxy headers, then PROOF_PUBLIC_BASE_URL, then the request origin.
  */

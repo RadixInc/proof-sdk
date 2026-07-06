@@ -39,7 +39,7 @@ import {
   serializeMarkdown,
 } from './headless-engine.js';
 import { resolveCollabSigningSecret, verifyCollabToken } from './collab-token';
-import { hashSecret } from './util';
+import { hashSecret, resolveDefaultHumanRole } from './util';
 import type { ResolvedRole } from './util';
 import { canonicalizeStoredMarks } from '../src/formats/marks';
 import type { CommentReply, StoredMark } from '../src/formats/marks';
@@ -118,6 +118,7 @@ interface DoEnv {
   PROOF_OPS_RATE_LIMIT_MAX?: string;
   PROOF_OPS_RATE_LIMIT_WINDOW_MS?: string;
   PROOF_EVENT_RETENTION_MAX?: string;
+  PROOF_DEFAULT_HUMAN_ROLE?: string;
   SNAPSHOTS?: R2Bucket;
   PROOF_SNAPSHOT_PREFIX?: string;
 }
@@ -665,8 +666,7 @@ export class DocumentDO extends YServer {
       return Response.json({ success: false, error: parsed.error }, { status: 400 });
     }
 
-    const secretHash = request.headers.get('x-proof-secret-hash') || null;
-    const role = await this.resolveRole(secretHash);
+    const role = await this.resolveEffectiveRole(request, String(doc.share_state));
     const denied = authorizeDocumentOp(parsed.op, role, String(doc.share_state));
     if (denied) {
       return Response.json(denied.body, { status: denied.status });
@@ -727,25 +727,49 @@ export class DocumentDO extends YServer {
    * Operator's email rides in the additive `operator` field (ADR:
    * delegated-agent-identity-operator-provenance).
    */
-  private deriveOpIdentity(request: Request): { actor: string; operator: string | null } {
+  private parseActorIdentity(request: Request): Record<string, unknown> | null {
     const header = request.headers.get('x-proof-actor');
-    if (header) {
-      try {
-        const identity = JSON.parse(header) as Record<string, unknown>;
-        if (identity.kind === 'human' && typeof identity.email === 'string') {
-          if (typeof identity.delegatedAgentId === 'string' && identity.delegatedAgentId) {
-            return { actor: `ai:${identity.delegatedAgentId}`, operator: identity.email };
-          }
-          return { actor: `human:${identity.email}`, operator: null };
+    if (!header) return null;
+    try {
+      return JSON.parse(header) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  private deriveOpIdentity(request: Request): { actor: string; operator: string | null } {
+    const identity = this.parseActorIdentity(request);
+    if (identity) {
+      if (identity.kind === 'human' && typeof identity.email === 'string') {
+        if (typeof identity.delegatedAgentId === 'string' && identity.delegatedAgentId) {
+          return { actor: `ai:${identity.delegatedAgentId}`, operator: identity.email };
         }
-        if (identity.kind === 'agent' && typeof identity.serviceTokenId === 'string') {
-          return { actor: `ai:${identity.serviceTokenId}`, operator: null };
-        }
-      } catch {
-        // fall through to the default actor
+        return { actor: `human:${identity.email}`, operator: null };
+      }
+      if (identity.kind === 'agent' && typeof identity.serviceTokenId === 'string') {
+        return { actor: `ai:${identity.serviceTokenId}`, operator: null };
       }
     }
     return { actor: 'ai:unknown', operator: null };
+  }
+
+  /**
+   * Effective role for a mutation: the token-mapped role when a share/
+   * bridge token is presented, otherwise the instance default role for
+   * tokenless SSO humans on ACTIVE documents (access-authn ADR) — the same
+   * fallback already applied to reads (handleState et al. in api.ts).
+   * Agents never get a default role; their access stays token-gated.
+   */
+  private async resolveEffectiveRole(
+    request: Request,
+    shareState: string,
+  ): Promise<ResolvedRole | null> {
+    const tokenRole = await this.resolveRole(request.headers.get('x-proof-secret-hash'));
+    if (tokenRole) return tokenRole;
+    if (shareState !== 'ACTIVE') return null;
+    const identity = this.parseActorIdentity(request);
+    if (identity?.kind !== 'human') return null;
+    return resolveDefaultHumanRole(this.env as DoEnv);
   }
 
   /**
@@ -767,7 +791,7 @@ export class DocumentDO extends YServer {
         { status: 404 },
       );
     }
-    const role = await this.resolveRole(request.headers.get('x-proof-secret-hash'));
+    const role = await this.resolveEffectiveRole(request, String(doc.share_state));
     const denied = authorizePresence(role, String(doc.share_state));
     if (denied) return Response.json(denied.body, { status: denied.status });
 
@@ -1599,7 +1623,7 @@ export class DocumentDO extends YServer {
         operator: null,
       };
     }
-    const role = await this.resolveRole(request.headers.get('x-proof-secret-hash'));
+    const role = await this.resolveEffectiveRole(request, String(doc.share_state));
     const denied = authorizeDocumentOp('rewrite.apply', role, String(doc.share_state));
     return {
       denied: denied ? Response.json(denied.body, { status: denied.status }) : null,
