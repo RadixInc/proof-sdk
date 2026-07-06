@@ -14,6 +14,7 @@ import { getServerByName } from 'partyserver';
 import { canonicalizeStoredMarks } from '../src/formats/marks';
 import type { Identity } from './access';
 import { agentDocsResponse } from './agent-docs';
+import { proofSkillResponse } from './proof-skill';
 import { resolveCollabSigningSecret, signCollabToken } from './collab-token';
 import type { DocumentDO } from './document-do';
 import { buildProofSdkAgentDescriptor, buildProofSdkLinks } from './sdk-links';
@@ -1058,6 +1059,13 @@ export async function handleApiRequest(
   // with the deploy so they cannot drift from the routes below.
   if (method === 'GET' && path === '/agent-docs') {
     return agentDocsResponse();
+  }
+
+  // Installable agent skill (issue #44): the durable form of the invite
+  // bootstrap. Origin is interpolated at serve time so the committed code
+  // stays deployment-agnostic.
+  if (method === 'GET' && path === '/proof.SKILL.md') {
+    return proofSkillResponse(getPublicBaseUrl(request, env));
   }
 
   // Personal library (issue #15): humans only, keyed by SSO email.

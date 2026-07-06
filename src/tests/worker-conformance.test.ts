@@ -386,6 +386,32 @@ async function baseBattery(s: Server) {
     disconnect,
   );
 
+  // --- GET /proof.SKILL.md — installable agent skill (issue #44)
+  const skillRes = await fetch(`${s.base}/proof.SKILL.md`, { headers: AGENT });
+  const skillText = await skillRes.text();
+  ok(
+    'GET /proof.SKILL.md -> 200 markdown',
+    skillRes.status === 200 && (skillRes.headers.get('content-type') ?? '').includes('text/markdown'),
+    skillRes.status,
+  );
+  ok(
+    'skill: frontmatter + self-contained bootstrap',
+    skillText.startsWith('---\n') &&
+      skillText.includes('name: proof-collab') &&
+      skillText.includes('/agent-docs') &&
+      skillText.includes('x-agent-id') &&
+      skillText.includes('cloudflared access token'),
+    skillText.slice(0, 200),
+  );
+  // The interpolated origin is the deployment's PUBLIC base
+  // (PROOF_PUBLIC_BASE_URL when configured, else the request origin), so
+  // assert interpolation happened rather than pinning a specific value.
+  ok(
+    'skill: serve-time origin interpolated',
+    /served by https?:\/\/[^\s;]+;/.test(skillText) && !skillText.includes('${origin}'),
+    skillText.match(/served by [^\n]*/)?.[0],
+  );
+
   // --- POST /share/markdown JSON (upstream L545, L1669)
   const shareRes = await fetch(`${s.base}/share/markdown`, {
     method: 'POST',
