@@ -11,4 +11,4 @@ export {
   getHeadlessMilkdownParser,
   parseMarkdownWithHtmlFallback,
   serializeMarkdown,
-} from '../server/milkdown-headless.js';
+} from './milkdown-headless.js';

@@ -18,6 +18,8 @@ import type { DocumentDO } from './document-do';
 import { buildProofSdkAgentDescriptor, buildProofSdkLinks } from './sdk-links';
 import { renderSnapshotHtml, snapshotObjectKey, snapshotPublicPath } from './snapshot';
 import { queryLibrary, recordVisit, renderLibraryHtml } from './library';
+import { getBugReportSpec, handleBugReportSubmit } from './bug-reports';
+import type { BugReportEnv } from './bug-reports';
 import {
   generateSlug,
   getPresentedSecret,
@@ -29,7 +31,7 @@ import {
 } from './util';
 import type { ResolvedRole, ShareRole } from './util';
 
-export interface ApiEnv {
+export interface ApiEnv extends BugReportEnv {
   DOCUMENT_DO: DurableObjectNamespace<DocumentDO>;
   DB: D1Database;
   PROOF_PUBLIC_BASE_URL?: string;
@@ -1068,6 +1070,20 @@ export async function handleApiRequest(
     path.match(/^\/api\/agent\/([a-z0-9-]+)\/ops$/);
   if (method === 'POST' && opsMatch) {
     return forwardToDocumentDo(request, env, opsMatch[1], _identity, '/internal/ops');
+  }
+
+  // Bug-report bridge (issue #16): plain-fetch filing to the configured
+  // repo. Upstream mounted these under both /api/agent and /documents.
+  const bugReportMatch = path.match(/^\/(?:api\/agent|documents)\/bug-reports$/);
+  if (bugReportMatch) {
+    if (method === 'GET') return json({ success: true, ...getBugReportSpec() });
+    if (method === 'POST') return handleBugReportSubmit(request, env, _identity);
+  }
+  if (
+    method === 'GET' &&
+    path.match(/^\/(?:api\/agent|documents)\/bug-reports\/spec$/)
+  ) {
+    return json({ success: true, ...getBugReportSpec() });
   }
 
   const snapshotMatch = path.match(/^\/snapshots\/([a-z0-9-]+)\.html$/);

@@ -58,6 +58,11 @@
     // share token (clean /d/:slug links). One of: viewer, commenter, editor.
     // Agents always need a document token regardless of this setting.
     // "PROOF_DEFAULT_HUMAN_ROLE": "editor",
+    // Bug-report bridge (optional): files GitHub issues to YOUR repo.
+    // Set the token as an encrypted secret (PROOF_GITHUB_ISSUES_TOKEN),
+    // never as a plain var. Unset -> the route answers 503.
+    // "PROOF_GITHUB_ISSUES_OWNER": "your-org",
+    // "PROOF_GITHUB_ISSUES_REPO": "your-repo",
     // Durability tuning (issue #8). Every Yjs update is persisted
     // synchronously; these control the derived-projection cadence.
     // "PROOF_COLLAB_PERSIST_DEBOUNCE_MS": "250",  // projection persist debounce

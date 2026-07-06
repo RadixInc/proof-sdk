@@ -1,4 +1,4 @@
-import { getHeadlessMilkdownParser } from '../../server/milkdown-headless.js';
+import { getHeadlessMilkdownParser } from '../../workers/milkdown-headless.js';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);

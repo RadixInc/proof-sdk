@@ -1,4 +1,4 @@
-import { getHeadlessMilkdownParser, serializeMarkdown, serializeSingleNode } from '../../server/milkdown-headless.js';
+import { getHeadlessMilkdownParser, serializeMarkdown, serializeSingleNode } from '../../workers/milkdown-headless.js';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);

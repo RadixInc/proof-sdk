@@ -1,8 +1,0 @@
-{
-  "name": "@proof/server",
-  "private": true,
-  "type": "module",
-  "version": "0.1.0",
-  "description": "Proof SDK document, share, and collaboration server routes",
-  "exports": "./src/index.ts"
-}
