@@ -61,6 +61,8 @@ export interface ShareOpenContext {
   };
   session?: CollabSessionInfo;
   capabilities: { canRead: boolean; canComment: boolean; canEdit: boolean };
+  /** Which edge-auth story the deployment has (issue #43); additive. */
+  authMode?: 'access' | 'dev';
   links: { webUrl: string; snapshotUrl: string | null };
 }
 
@@ -161,6 +163,7 @@ export class ShareClient {
   private lastObservedUpdatedAt: string | null = null;
   private lastObservedMutationBase: ShareMutationBase | null = null;
   private mutationAccessEpoch: number | null = null;
+  private authMode: 'access' | 'dev' | null = null;
 
   constructor() {
     this.detectShareMode();
@@ -257,6 +260,15 @@ export class ShareClient {
 
   getSlug(): string | null {
     return this.slug;
+  }
+
+  /**
+   * Edge-auth story reported by open-context. Null until observed; callers
+   * that must not overpromise (the agent invite) should treat null as
+   * 'access' — the mode every real deployment runs in.
+   */
+  getAuthMode(): 'access' | 'dev' | null {
+    return this.authMode;
   }
 
   getTokenizedWebUrl(options?: { token?: string; origin?: string }): string | null {
@@ -643,6 +655,9 @@ export class ShareClient {
     this.rememberObservedDocument(payload.doc);
     this.rememberAccessEpoch(payload.session?.accessEpoch);
     this.rememberObservedMutationBase(payload as unknown as Record<string, unknown>);
+    if (payload.authMode === 'access' || payload.authMode === 'dev') {
+      this.authMode = payload.authMode;
+    }
     return payload;
   }
 
