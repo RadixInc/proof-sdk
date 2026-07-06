@@ -923,9 +923,17 @@ async function handleEventsPending(
   request: Request,
   env: ApiEnv,
   slug: string,
+  identity: Identity,
 ): Promise<Response> {
-  const { state, role } = await loadDocAndRole(request, env, slug);
+  const { state, role: tokenRole } = await loadDocAndRole(request, env, slug);
   if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  // Tokenless SSO humans get the instance default role here too, matching
+  // open-context/collab-session (issue #9) — otherwise every clean /d/:slug
+  // session polls this endpoint and 401s forever since it never holds a
+  // document token to present.
+  const role =
+    tokenRole ??
+    (identity.kind === 'human' ? resolveDefaultHumanRole(env) : null);
   const denied = gateEventsAccess(state, role);
   if (denied) return denied;
   const url = new URL(request.url);
@@ -1117,7 +1125,7 @@ export async function handleApiRequest(
     path.match(/^\/api\/agent\/([a-z0-9-]+)\/events\/(pending|ack)$/);
   if (eventsMatch) {
     if (method === 'GET' && eventsMatch[2] === 'pending') {
-      return handleEventsPending(request, env, eventsMatch[1]);
+      return handleEventsPending(request, env, eventsMatch[1], _identity);
     }
     if (method === 'POST' && eventsMatch[2] === 'ack') {
       return handleEventsAck(request, env, eventsMatch[1], _identity);

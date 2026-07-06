@@ -170,6 +170,15 @@ async function main() {
     const agentCtx = await openContext(slug, AGENT);
     ok('open-context tokenless agent -> 401', agentCtx.status === 401, agentCtx);
 
+    // events/pending: the web client polls this for cross-instance refresh
+    // signals even in tokenless sessions, so it needs the same default-role
+    // fallback as open-context/collab-session — agents still need a token.
+    const humanEvents = await fetch(`${BASE}/documents/${slug}/events/pending?after=0`, { headers: HUMAN });
+    const humanEventsBody = await humanEvents.json().catch(() => null);
+    ok('tokenless human events/pending -> 200', humanEvents.status === 200, humanEventsBody);
+    const agentEvents = await fetch(`${BASE}/documents/${slug}/events/pending?after=0`, { headers: AGENT });
+    ok('tokenless agent events/pending stays 401', agentEvents.status === 401, agentEvents);
+
     // The minted session token works end-to-end: connect, edit, persist.
     const client = connectProvider(slug, human.body.session.token);
     cleanups.push(() => client.provider.destroy());
