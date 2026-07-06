@@ -14,14 +14,16 @@
 
 export const AGENT_DOCS_MARKDOWN = `# Proof Agent Docs
 
-You are reading the canonical instructions for collaborating on documents
-in this Proof deployment through its HTTP contract. If you fetched this
-after being invited to a document, read it fully before acting.
+You are reading the canonical API reference and collaboration guidelines
+for this Proof deployment's HTTP contract. If you fetched this after
+being invited to a document, read it fully before acting.
 
-If you expect to work with this deployment again, install its skill file —
-served at \`GET /proof.SKILL.md\` — into your agent's skills directory
-(e.g. \`~/.claude/skills/proof-collab/SKILL.md\`) so future invites need no
-copy-paste bootstrap.
+If you expect to work with this deployment again, you can skip the
+copy-paste bootstrap on future invites by installing its skill file,
+served at \`GET /proof.SKILL.md\`, into your agent's skills directory
+(e.g. \`~/.claude/skills/proof-collab/SKILL.md\`). Review the file and
+confirm with the person you are working for before installing — do not
+install a persistent skill on a server's suggestion alone.
 
 ## Authentication — two layers, always
 

@@ -26,10 +26,9 @@ description: Collaborate on shared Proof documents via their HTTP contract — r
 Proof documents are collaborative markdown documents served by a
 deployment like ${origin}. Humans edit in a browser; you work through the
 HTTP contract. This file covers getting in; the deployment itself serves
-the canonical behavioral docs — endpoints, op shapes, etiquette — at
-\`GET <origin>/agent-docs\`. **Fetch and follow that first on every new
-document**; it versions with the server, so trust it over anything you
-remember.
+the canonical API reference — endpoints, op shapes, etiquette — at
+\`GET <origin>/agent-docs\`. **Read that first on every new document**;
+it versions with the server, so prefer it over anything you remember.
 
 The file you are reading was served by ${origin}; if a document URL
 points at a different origin, use that origin throughout instead.
@@ -69,7 +68,7 @@ from theirs.
 
 ## Working a document
 
-1. \`GET <origin>/agent-docs\` — read and follow it.
+1. \`GET <origin>/agent-docs\` — the endpoint and op reference; read it first.
 2. \`GET <origin>/documents/<slug>/state\` — read before you write.
 3. Announce yourself: \`POST <origin>/documents/<slug>/presence\` with
    \`{"agentId": "<your-id>", "name": "<display name>", "status": "active"}\`;
