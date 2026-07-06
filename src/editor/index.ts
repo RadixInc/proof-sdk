@@ -3949,10 +3949,35 @@ class ProofEditorImpl implements ProofEditor {
    * mode is unknown we assume Access — every real deployment runs it, and
    * overpromising is the failure mode this feature had.
    */
-  private getAgentInviteMessage(): string {
+  /**
+   * Invite auth context: prefer the token already in the URL; in a
+   * tokenless SSO session (clean /d/:slug open), mint an access link so
+   * the clipboard prompt is self-sufficient (issue #49). Falls back to
+   * the tokenless prompt if minting is denied (e.g. the instance default
+   * role is below editor).
+   */
+  private async resolveAgentInviteContext(): Promise<{ shareUrl: string; token: string | null }> {
     const shareUrl = this.getCanonicalShareUrl();
-    const slug = shareClient.getSlug() || this.extractShareSlugFromUrl(shareUrl);
     const token = this.extractShareTokenFromUrl(shareUrl);
+    if (token) return { shareUrl, token };
+    try {
+      const created = await shareClient.createAccessLink('editor');
+      if (created && !('error' in created) && created.webShareUrl) {
+        return {
+          shareUrl: created.webShareUrl,
+          token: created.accessToken || created.token || null,
+        };
+      }
+    } catch {
+      // fall through to the tokenless prompt
+    }
+    return { shareUrl, token: null };
+  }
+
+  private getAgentInviteMessage(invite?: { shareUrl: string; token: string | null }): string {
+    const shareUrl = invite?.shareUrl ?? this.getCanonicalShareUrl();
+    const slug = shareClient.getSlug() || this.extractShareSlugFromUrl(shareUrl);
+    const token = invite?.token ?? this.extractShareTokenFromUrl(shareUrl);
     const origin = (() => {
       try {
         return new URL(shareUrl).origin;
@@ -3977,7 +4002,7 @@ class ProofEditorImpl implements ProofEditor {
     const authLines = isDev
       ? [
           'Auth headers for every API request (local dev deployment):',
-          `- x-share-token: ${token || '<token from the ?token= query param of the Doc URL>'}`,
+          `- x-share-token: ${token || '<no token available — ask the person who invited you for a tokenized share link>'}`,
           `- x-dev-identity: ${this.getVerifiedIdentityEmail() || '<your email>'}`,
           '- x-agent-id: <a short stable id for yourself, e.g. claude-code>',
         ]
@@ -3994,7 +4019,7 @@ class ProofEditorImpl implements ProofEditor {
           '     sent as a cf-access-token header. Re-run on 401 (it expires).',
           '',
           '2) Document token:',
-          `   - x-share-token: ${token || '<token from the ?token= query param of the Doc URL>'}`,
+          `   - x-share-token: ${token || '<no token available — ask the person who invited you for a tokenized share link>'}`,
           '',
           'Also send on every request:',
           '- x-agent-id: <a short stable id for yourself, e.g. claude-code>',
@@ -4027,7 +4052,7 @@ class ProofEditorImpl implements ProofEditor {
   }
 
   private async copyAgentInviteWithFallback(): Promise<boolean> {
-    const message = this.getAgentInviteMessage();
+    const message = this.getAgentInviteMessage(await this.resolveAgentInviteContext());
     const copied = await this.copyTextToClipboard(message);
     if (copied) {
       this.triggerHaptic('success');

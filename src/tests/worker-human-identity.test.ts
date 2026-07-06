@@ -179,6 +179,40 @@ async function main() {
     const agentEvents = await fetch(`${BASE}/documents/${slug}/events/pending?after=0`, { headers: AGENT });
     ok('tokenless agent events/pending stays 401', agentEvents.status === 401, agentEvents);
 
+    // state: same default-role parity (issue #49) — a delegated agent
+    // entering with its Operator's credential reads tokenlessly too.
+    const humanState = await fetch(`${BASE}/documents/${slug}/state`, { headers: HUMAN });
+    ok('tokenless human state -> 200', humanState.status === 200, humanState.status);
+    const delegatedState = await fetch(`${BASE}/documents/${slug}/state`, {
+      headers: { ...HUMAN, 'x-agent-id': 'claude-code' },
+    });
+    ok('tokenless delegated-agent state -> 200', delegatedState.status === 200, delegatedState.status);
+    const agentState = await fetch(`${BASE}/documents/${slug}/state`, { headers: AGENT });
+    ok('tokenless agent state stays 401', agentState.status === 401, agentState.status);
+
+    // access-links: default-role editors may mint (issue #49) — this is
+    // what makes the agent invite self-sufficient from a clean URL.
+    const humanMint = await fetch(`${BASE}/documents/${slug}/access-links`, {
+      method: 'POST',
+      headers: { ...HUMAN, 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'editor' }),
+    });
+    const humanMintBody = (await humanMint.json().catch(() => null)) as Record<string, any> | null;
+    ok('tokenless human mints access link -> 200', humanMint.status === 200, humanMintBody);
+    ok(
+      'minted link carries token + web url',
+      typeof humanMintBody?.accessToken === 'string' &&
+        humanMintBody.accessToken.length > 0 &&
+        String(humanMintBody?.webShareUrl ?? '').includes('token='),
+      humanMintBody,
+    );
+    const agentMint = await fetch(`${BASE}/documents/${slug}/access-links`, {
+      method: 'POST',
+      headers: { ...AGENT, 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'editor' }),
+    });
+    ok('tokenless agent access-links stays 403', agentMint.status === 403, agentMint.status);
+
     // The minted session token works end-to-end: connect, edit, persist.
     const client = connectProvider(slug, human.body.session.token);
     cleanups.push(() => client.provider.destroy());
@@ -243,6 +277,13 @@ async function main() {
     ok('configured default demotes tokenless humans to commenter', demoted.body.session.role === 'commenter', demoted.body);
     const agent2 = await session(doc2.slug as string, AGENT);
     ok('agents unaffected by default role config', agent2.status === 401, agent2);
+    // Below-editor defaults cannot mint access links (issue #49 gate).
+    const demotedMint = await fetch(`${BASE}/documents/${doc2.slug}/access-links`, {
+      method: 'POST',
+      headers: { ...HUMAN, 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'editor' }),
+    });
+    ok('commenter-default human cannot mint access links -> 403', demotedMint.status === 403, demotedMint.status);
 
     console.log(`\nworker-human-identity: ${passed} assertions passed`);
   } finally {

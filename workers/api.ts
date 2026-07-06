@@ -437,12 +437,25 @@ async function loadDocAndRole(request: Request, env: ApiEnv, slug: string) {
   return { state, role } as const;
 }
 
-async function handleState(request: Request, env: ApiEnv, slug: string): Promise<Response> {
-  const { state, role } = await loadDocAndRole(request, env, slug);
+async function handleState(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+  identity: Identity,
+): Promise<Response> {
+  const { state, role: tokenRole } = await loadDocAndRole(request, env, slug);
   if (!state) return json({ success: false, error: 'Document not found' }, 404);
   if (state.shareState === 'DELETED') {
     return json({ success: false, error: 'Document deleted' }, 410);
   }
+  // Tokenless SSO humans get the instance default role, matching
+  // open-context and events/pending (issues #38/#49) — this includes
+  // delegated agents, which hold exactly what their Operator holds.
+  const role =
+    tokenRole ??
+    (identity.kind === 'human' && state.shareState === 'ACTIVE'
+      ? resolveDefaultHumanRole(env)
+      : null);
   if (state.shareState === 'REVOKED' && role !== 'owner_bot') {
     return json({ success: false, error: 'Document access revoked' }, 403);
   }
@@ -864,12 +877,22 @@ async function handleCreateAccessLink(
   request: Request,
   env: ApiEnv,
   slug: string,
+  identity: Identity,
 ): Promise<Response> {
-  const { state, role } = await loadDocAndRole(request, env, slug);
+  const { state, role: tokenRole } = await loadDocAndRole(request, env, slug);
   if (!state) return json({ error: 'Document not found' }, 404);
   if (state.shareState === 'DELETED') {
     return json({ error: 'Document deleted' }, 410);
   }
+  // Tokenless SSO humans hold the instance default role (issue #38); when
+  // that role clears the same editor/owner bar as a token-holder, they may
+  // mint links — the everyday case being the editor's agent invite from a
+  // clean /d/:slug session (issue #49).
+  const role =
+    tokenRole ??
+    (identity.kind === 'human' && state.shareState === 'ACTIVE'
+      ? resolveDefaultHumanRole(env)
+      : null);
   if (role !== 'owner_bot' && role !== 'editor') {
     return json({ error: 'Not authorized to create access links' }, 403);
   }
@@ -1102,7 +1125,7 @@ export async function handleApiRequest(
     /^\/(?:documents|api\/agent)\/([a-z0-9-]+)\/state$/,
   );
   if (method === 'GET' && stateMatch) {
-    return handleState(request, env, stateMatch[1]);
+    return handleState(request, env, stateMatch[1], _identity);
   }
 
   const opsMatch =
@@ -1163,7 +1186,7 @@ export async function handleApiRequest(
     /^\/(?:api\/)?documents\/([a-z0-9-]+)\/access-links$/,
   );
   if (method === 'POST' && accessLinkMatch) {
-    return handleCreateAccessLink(request, env, accessLinkMatch[1]);
+    return handleCreateAccessLink(request, env, accessLinkMatch[1], _identity);
   }
 
   const eventsMatch =
