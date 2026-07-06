@@ -3959,10 +3959,9 @@ class ProofEditorImpl implements ProofEditor {
     }
 
     const encodedSlug = encodeURIComponent(slug);
-    const presenceUrl = `${origin}/api/agent/${encodedSlug}/presence`;
-    const stateUrl = `${origin}/api/agent/${encodedSlug}/state`;
-    const opsUrl = `${origin}/api/agent/${encodedSlug}/ops`;
-    const editUrl = `${origin}/api/agent/${encodedSlug}/edit`;
+    const stateUrl = `${origin}/documents/${encodedSlug}/state`;
+    const opsUrl = `${origin}/documents/${encodedSlug}/ops`;
+    const eventsUrl = `${origin}/documents/${encodedSlug}/events/pending?after=0&limit=50`;
 
     return [
       'Collaborate with me on this Proof doc.',
@@ -3971,19 +3970,17 @@ class ProofEditorImpl implements ProofEditor {
       '',
       'Auth for each API request:',
       `- x-share-token: ${token || '<token-from-doc-url>'}`,
-      '- X-Agent-Id: <your-agent-id>',
-      '- (Use the token from the Doc URL query param: ?token=...)',
+      '- (the token is the ?token=... query param on the Doc URL above)',
       '',
       'Start here:',
-      '1) Read current document state with your identity header:',
+      '1) Read current document state:',
       `   GET ${stateUrl}`,
-      '   header: X-Agent-Id: <your-agent-id>',
-      '2) Optionally set your friendly name in presence:',
-      `   POST ${presenceUrl}`,
-      '   body: {"agentId":"<your-agent-id>","name":"<your-name>","status":"active"}',
-      '3) If edits/comments are useful based on state, apply them with:',
+      '2) If edits/comments are useful based on state, apply them as an op',
+      '   (see AGENT_CONTRACT.md for op types, e.g. comment.add, suggestion.add, rewrite.apply):',
       `   POST ${opsUrl}`,
-      `   or POST ${editUrl}`,
+      '   include an "Idempotency-Key" header on each mutation',
+      '3) Optionally poll for events from other collaborators:',
+      `   GET ${eventsUrl}`,
       '4) Then reply briefly with what you changed or suggest next steps.',
     ].join('\n');
   }
