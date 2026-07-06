@@ -1430,6 +1430,93 @@ export class DocumentDO extends YServer {
     };
   }
 
+  // -------------------------------------------------------------------------
+  // Share lifecycle (issue #13)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Owner share-state transition. Pause/revoke/delete bump the access epoch
+   * (outstanding collab session tokens carry the old epoch and are refused
+   * on reconnect) and close live connections immediately; revoke/delete also
+   * permanently invalidate all document access tokens.
+   */
+  async setShareState(
+    next: 'ACTIVE' | 'PAUSED' | 'REVOKED' | 'DELETED',
+    actor: string,
+  ): Promise<{ shareState: string; accessEpoch: number } | null> {
+    const doc = this.row();
+    if (!doc) return null;
+    const now = new Date().toISOString();
+    const bumpEpoch = next !== 'ACTIVE';
+    this.store.exec(
+      `UPDATE document
+         SET share_state = ?, access_epoch = access_epoch + ?, updated_at = ?
+       WHERE id = 1`,
+      next,
+      bumpEpoch ? 1 : 0,
+      now,
+    );
+    if (next === 'REVOKED' || next === 'DELETED') {
+      this.store.exec(
+        'UPDATE document_access SET revoked_at = ? WHERE revoked_at IS NULL',
+        now,
+      );
+    }
+    if (next !== 'ACTIVE') {
+      for (const conn of this.getConnections()) {
+        try {
+          conn.close(4401, 'document sharing changed');
+        } catch {
+          // already gone
+        }
+      }
+    }
+    const eventType =
+      next === 'ACTIVE'
+        ? 'document.resumed'
+        : next === 'PAUSED'
+          ? 'document.paused'
+          : next === 'REVOKED'
+            ? 'document.revoked'
+            : 'document.deleted';
+    this.addEvent(eventType, {}, actor);
+    const db = (this.env as DoEnv).DB;
+    if (db) {
+      try {
+        await db
+          .prepare('UPDATE documents SET share_state = ?, updated_at = ? WHERE slug = ?')
+          .bind(next, now, String(doc.slug))
+          .run();
+      } catch (err) {
+        console.error('d1 index refresh failed', err);
+      }
+    }
+    const fresh = this.row()!;
+    return {
+      shareState: String(fresh.share_state),
+      accessEpoch: Number(fresh.access_epoch),
+    };
+  }
+
+  /** Mint an above-default document access token (issue #13). */
+  async addAccessToken(
+    tokenId: string,
+    role: 'viewer' | 'commenter' | 'editor',
+    secretHash: string,
+    createdAt: string,
+  ): Promise<{ ok: boolean }> {
+    if (!this.row()) return { ok: false };
+    this.store.exec(
+      `INSERT INTO document_access (token_id, role, secret_hash, created_at, revoked_at)
+       VALUES (?, ?, ?, ?, NULL)`,
+      tokenId,
+      role,
+      secretHash,
+      createdAt,
+    );
+    return { ok: true };
+  }
+
   /** Session facts for the Worker's collab-session route. */
   async getCollabContext(): Promise<{ shareState: string; accessEpoch: number } | null> {
     const doc = this.row();

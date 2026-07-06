@@ -736,6 +736,94 @@ async function handleOpenContext(
 }
 
 // ---------------------------------------------------------------------------
+// Share lifecycle (issue #13)
+// ---------------------------------------------------------------------------
+
+type LifecycleVerb = 'pause' | 'resume' | 'revoke' | 'delete';
+
+const LIFECYCLE_TARGET_STATE: Record<
+  LifecycleVerb,
+  'ACTIVE' | 'PAUSED' | 'REVOKED' | 'DELETED'
+> = {
+  pause: 'PAUSED',
+  resume: 'ACTIVE',
+  revoke: 'REVOKED',
+  delete: 'DELETED',
+};
+
+/** Owner operations require the ownerSecret (upstream canOwnerMutate). */
+async function handleLifecycle(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+  verb: LifecycleVerb,
+  identity: Identity,
+): Promise<Response> {
+  const { state, role } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  if (role !== 'owner_bot') {
+    return json({ error: `Not authorized to ${verb} document` }, 403);
+  }
+  const stub = env.DOCUMENT_DO.get(env.DOCUMENT_DO.idFromName(slug));
+  const actor =
+    identity.kind === 'agent' ? `agent:${identity.serviceTokenId}` : 'owner';
+  const result = await stub.setShareState(LIFECYCLE_TARGET_STATE[verb], actor);
+  if (!result) return json({ success: false, error: 'Document not found' }, 404);
+  return json({ success: true, shareState: result.shareState, snapshotUrl: null });
+}
+
+/** POST /documents/:slug/access-links — mint an above-default token. */
+async function handleCreateAccessLink(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+): Promise<Response> {
+  const { state, role } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ error: 'Document not found' }, 404);
+  if (state.shareState === 'DELETED') {
+    return json({ error: 'Document deleted' }, 410);
+  }
+  if (role !== 'owner_bot' && role !== 'editor') {
+    return json({ error: 'Not authorized to create access links' }, 403);
+  }
+  let body: Record<string, unknown> = {};
+  try {
+    const parsed = (await request.json()) as unknown;
+    if (isPlainObject(parsed)) body = parsed;
+  } catch {
+    // validated below
+  }
+  const requestedRole = body.role;
+  if (!isShareRole(requestedRole)) {
+    return json({ error: 'role must be viewer, commenter, or editor' }, 400);
+  }
+  const tokenId = crypto.randomUUID();
+  const secret = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const stub = env.DOCUMENT_DO.get(env.DOCUMENT_DO.idFromName(slug));
+  const created = await stub.addAccessToken(
+    tokenId,
+    requestedRole,
+    await hashSecret(secret),
+    createdAt,
+  );
+  if (!created.ok) return json({ error: 'Document not found' }, 404);
+  const base = getPublicBaseUrl(request, env);
+  const shareUrl = base ? `${base}/d/${slug}` : `/d/${slug}`;
+  const separator = shareUrl.includes('?') ? '&' : '?';
+  return json({
+    success: true,
+    slug,
+    role: requestedRole,
+    tokenId,
+    accessToken: secret,
+    token: secret,
+    webShareUrl: `${shareUrl}${separator}token=${encodeURIComponent(secret)}`,
+    createdAt,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Agent events (issue #12)
 // ---------------------------------------------------------------------------
 
@@ -894,6 +982,26 @@ export async function handleApiRequest(
     return forwardToDocumentDo(request, env, opsMatch[1], _identity, '/internal/ops');
   }
 
+  const lifecycleMatch = path.match(
+    /^\/(?:api\/)?documents\/([a-z0-9-]+)\/(pause|resume|revoke|delete)$/,
+  );
+  if (method === 'POST' && lifecycleMatch) {
+    return handleLifecycle(
+      request,
+      env,
+      lifecycleMatch[1],
+      lifecycleMatch[2] as LifecycleVerb,
+      _identity,
+    );
+  }
+
+  const accessLinkMatch = path.match(
+    /^\/(?:api\/)?documents\/([a-z0-9-]+)\/access-links$/,
+  );
+  if (method === 'POST' && accessLinkMatch) {
+    return handleCreateAccessLink(request, env, accessLinkMatch[1]);
+  }
+
   const eventsMatch =
     path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/events\/(pending|ack)$/) ??
     path.match(/^\/api\/agent\/([a-z0-9-]+)\/events\/(pending|ack)$/);
@@ -940,6 +1048,9 @@ export async function handleApiRequest(
   }
   if (method === 'PUT' && docMatch) {
     return forwardToDocumentDo(request, env, docMatch[1], _identity, '/internal/document');
+  }
+  if (method === 'DELETE' && docMatch) {
+    return handleLifecycle(request, env, docMatch[1], 'delete', _identity);
   }
 
   return null;
