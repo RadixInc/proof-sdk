@@ -29,6 +29,7 @@ import {
   hashSecret,
   isPlainObject,
   isShareRole,
+  resolveDefaultHumanRole,
   stripEphemeralCollabSpans,
   timingSafeEqualStrings,
 } from './util';
@@ -572,17 +573,6 @@ async function handleDocRead(request: Request, env: ApiEnv, slug: string): Promi
 // ---------------------------------------------------------------------------
 // Collab sessions
 // ---------------------------------------------------------------------------
-
-/**
- * Instance-wide default role for tokenless SSO humans (see the access-authn
- * ADR): Access already authenticated them, so a clean /d/:slug link grants
- * this role on ACTIVE documents. Agents never get a default role — their
- * access stays document-token-gated (unchanged contract behavior).
- */
-function resolveDefaultHumanRole(env: ApiEnv): ShareRole {
-  const value = env.PROOF_DEFAULT_HUMAN_ROLE?.trim();
-  return isShareRole(value) ? value : 'editor';
-}
 
 async function handleCollabSession(
   request: Request,

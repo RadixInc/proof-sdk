@@ -7,6 +7,7 @@
  *     actually connects + edits end-to-end
  *   - the session response carries the verified identity (email sub)
  *   - a presented document token still wins over the default role
+ *   - the default role also applies to mutations (/ops), not just reads
  *   - agents without a document token stay 401 (contract unchanged)
  *   - PROOF_DEFAULT_HUMAN_ROLE=commenter demotes tokenless humans
  */
@@ -212,6 +213,23 @@ async function main() {
       body: JSON.stringify({ role: 'editor' }),
     });
     ok('tokenless agent access-links stays 403', agentMint.status === 403, agentMint.status);
+
+    // ops: default-role parity for mutations, not just reads (a tokenless
+    // SSO human accepting a suggestion previously got 401 — /ops resolved
+    // role from a presented token alone, with no default-role fallback).
+    const humanOps = await fetch(`${BASE}/documents/${slug}/ops`, {
+      method: 'POST',
+      headers: { ...HUMAN, 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'comment.add', payload: { quote: 'Seed', text: 'hi' } }),
+    });
+    const humanOpsBody = (await humanOps.json().catch(() => null)) as Record<string, any> | null;
+    ok('tokenless human ops (comment.add) -> 200', humanOps.status === 200, humanOpsBody);
+    const agentOps = await fetch(`${BASE}/documents/${slug}/ops`, {
+      method: 'POST',
+      headers: { ...AGENT, 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'comment.add', payload: { quote: 'Seed', text: 'hi' } }),
+    });
+    ok('tokenless agent ops stays 401', agentOps.status === 401, agentOps.status);
 
     // The minted session token works end-to-end: connect, edit, persist.
     const client = connectProvider(slug, human.body.session.token);
