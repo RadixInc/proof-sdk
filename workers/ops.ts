@@ -117,6 +117,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export type OpStoredMark = {
   kind?: string;
   by?: string;
+  /** Operator email when `by` is a delegated agent acting on a human's behalf. */
+  operator?: string;
   createdAt?: string;
   range?: { from: number; to: number };
   quote?: string;

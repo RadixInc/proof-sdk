@@ -202,6 +202,86 @@ async function main() {
     console.log('ok: unconfigured env rejects everything');
   }
 
+  // Delegated agent: human JWT + x-agent-id annotates the identity
+  {
+    const token = await sign({ email: 'jane@example.com' });
+    const id = await resolveIdentity(
+      req({ 'cf-access-jwt-assertion': token, 'x-agent-id': 'claude-code' }),
+      accessEnv,
+      getKey,
+    );
+    assert.deepEqual(id, {
+      kind: 'human',
+      email: 'jane@example.com',
+      source: 'access',
+      delegatedAgentId: 'claude-code',
+    });
+    console.log('ok: human JWT + x-agent-id resolves as delegated agent');
+  }
+
+  // x-agent-id is ignored on service-token identities (common_name is
+  // the sole source of agent identity)
+  {
+    const token = await sign({ common_name: 'ci-agent.access' });
+    const id = await resolveIdentity(
+      req({ 'cf-access-jwt-assertion': token, 'x-agent-id': 'impostor' }),
+      accessEnv,
+      getKey,
+    );
+    assert.deepEqual(id, {
+      kind: 'agent',
+      serviceTokenId: 'ci-agent.access',
+      source: 'access',
+    });
+    console.log('ok: x-agent-id ignored for service-token identities');
+  }
+
+  // Invalid agent ids are treated as absent, never rejected
+  {
+    const token = await sign({ email: 'jane@example.com' });
+    for (const bad of ['-leading-dash', 'has spaces', 'a'.repeat(65), '  ', 'ünïcode']) {
+      const id = await resolveIdentity(
+        req({ 'cf-access-jwt-assertion': token, 'x-agent-id': bad }),
+        accessEnv,
+        getKey,
+      );
+      assert.deepEqual(id, {
+        kind: 'human',
+        email: 'jane@example.com',
+        source: 'access',
+      });
+    }
+    console.log('ok: invalid x-agent-id values degrade to plain human');
+  }
+
+  // Dev mode: x-dev-identity + x-agent-id exercises the same delegation path
+  {
+    const devEnv = { PROOF_DEV_MODE: '1' };
+    const id = await resolveIdentity(
+      req({ 'x-dev-identity': 'someone@example.com', 'x-agent-id': 'local.agent' }),
+      devEnv,
+      getKey,
+    );
+    assert.deepEqual(id, {
+      kind: 'human',
+      email: 'someone@example.com',
+      source: 'dev',
+      delegatedAgentId: 'local.agent',
+    });
+    // x-dev-agent still wins as an autonomous agent; x-agent-id ignored
+    const agent = await resolveIdentity(
+      req({ 'x-dev-agent': 'local-ci', 'x-agent-id': 'ignored' }),
+      devEnv,
+      getKey,
+    );
+    assert.deepEqual(agent, {
+      kind: 'agent',
+      serviceTokenId: 'local-ci',
+      source: 'dev',
+    });
+    console.log('ok: dev-mode delegation mirrors the Access path');
+  }
+
   console.log('\nworker-access-identity: all tests passed');
 }
 

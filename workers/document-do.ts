@@ -211,6 +211,15 @@ export class DocumentDO extends YServer {
     if (!cols.includes('plain_text')) {
       this.store.exec('ALTER TABLE document ADD COLUMN plain_text TEXT');
     }
+    // DOs created before delegated agent identity lack operator
+    // (docs/adr/2026-07-delegated-agent-identity-operator-provenance.md).
+    const eventCols = this.store
+      .exec(`SELECT name FROM pragma_table_info('document_event')`)
+      .toArray()
+      .map((r) => String(r.name));
+    if (!eventCols.includes('operator')) {
+      this.store.exec('ALTER TABLE document_event ADD COLUMN operator TEXT');
+    }
 
     const debounceWait = positiveInt(
       env.PROOF_COLLAB_PERSIST_DEBOUNCE_MS,
@@ -676,8 +685,8 @@ export class DocumentDO extends YServer {
       }
     }
 
-    const actor = this.deriveOpActor(request);
-    const result = await this.executeOp(parsed.op, parsed.payload, actor);
+    const { actor, operator } = this.deriveOpIdentity(request);
+    const result = await this.executeOp(parsed.op, parsed.payload, actor, operator);
 
     if (idempotencyKey && result.status >= 200 && result.status < 300) {
       this.store.exec(
@@ -695,22 +704,33 @@ export class DocumentDO extends YServer {
     return Response.json(result.body, { status: result.status });
   }
 
-  private deriveOpActor(request: Request): string {
+  /**
+   * Map the Worker-verified identity (x-proof-actor, unforgeable from
+   * outside) to an actor string plus, for delegated agents, the Operator.
+   * A human identity carrying a delegatedAgentId is an Agent for
+   * provenance: actor keeps the plain `ai:<agentId>` format and the
+   * Operator's email rides in the additive `operator` field (ADR:
+   * delegated-agent-identity-operator-provenance).
+   */
+  private deriveOpIdentity(request: Request): { actor: string; operator: string | null } {
     const header = request.headers.get('x-proof-actor');
     if (header) {
       try {
         const identity = JSON.parse(header) as Record<string, unknown>;
         if (identity.kind === 'human' && typeof identity.email === 'string') {
-          return `human:${identity.email}`;
+          if (typeof identity.delegatedAgentId === 'string' && identity.delegatedAgentId) {
+            return { actor: `ai:${identity.delegatedAgentId}`, operator: identity.email };
+          }
+          return { actor: `human:${identity.email}`, operator: null };
         }
         if (identity.kind === 'agent' && typeof identity.serviceTokenId === 'string') {
-          return `ai:${identity.serviceTokenId}`;
+          return { actor: `ai:${identity.serviceTokenId}`, operator: null };
         }
       } catch {
         // fall through to the default actor
       }
     }
-    return 'ai:unknown';
+    return { actor: 'ai:unknown', operator: null };
   }
 
   /**
@@ -807,6 +827,9 @@ export class DocumentDO extends YServer {
         type: String(row.event_type),
         data,
         actor: row.actor === null ? null : String(row.actor),
+        // Additive: present only for delegated-agent actions (the Operator
+        // whose credential admitted the agent).
+        ...(row.operator ? { operator: String(row.operator) } : {}),
         createdAt: String(row.created_at),
         ackedAt: row.acked_at === null ? null : String(row.acked_at),
         ackedBy: row.acked_by === null ? null : String(row.acked_by),
@@ -848,12 +871,14 @@ export class DocumentDO extends YServer {
     type: string,
     data: Record<string, unknown>,
     actor: string | null,
+    operator: string | null = null,
   ): number {
     this.store.exec(
-      'INSERT INTO document_event (event_type, event_data, actor, created_at) VALUES (?, ?, ?, ?)',
+      'INSERT INTO document_event (event_type, event_data, actor, operator, created_at) VALUES (?, ?, ?, ?, ?)',
       type,
       JSON.stringify(data),
       actor,
+      operator,
       new Date().toISOString(),
     );
     const row = this.store.exec('SELECT last_insert_rowid() AS id').toArray()[0];
@@ -962,6 +987,7 @@ export class DocumentDO extends YServer {
     op: DocumentOpType,
     payload: Record<string, unknown>,
     actor: string,
+    operator: string | null = null,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
     // Ops resolve anchors against the current projection: catch it up first
     // so live collab edits made moments ago are addressable.
@@ -997,6 +1023,7 @@ export class DocumentDO extends YServer {
         const mark: OpStoredMark = {
           kind: 'comment',
           by,
+          ...(operator ? { operator } : {}),
           createdAt: now,
           quote: meta.quote,
           text,
@@ -1012,6 +1039,7 @@ export class DocumentDO extends YServer {
           'comment.added',
           { markId, by, quote: meta.quote, text },
           by,
+          operator,
         );
         return this.opSuccess(eventId, markId);
       }
@@ -1031,11 +1059,16 @@ export class DocumentDO extends YServer {
         if (!existing) {
           return { status: 404, body: { success: false, error: 'Mark not found' } };
         }
-        const reply: CommentReply = { by, text, at: now };
+        const reply: CommentReply = {
+          by,
+          ...(operator ? { operator } : {}),
+          text,
+          at: now,
+        };
         const thread = Array.isArray(existing.thread) ? [...existing.thread] : [];
         thread.push(reply);
         this.setMark(markId, { ...existing, thread });
-        const eventId = this.addEvent('comment.replied', { markId, by, text }, by);
+        const eventId = this.addEvent('comment.replied', { markId, by, text }, by, operator);
         return this.opSuccess(eventId, markId, {
           mark: this.document.getMap('marks').get(markId),
         });
@@ -1059,6 +1092,7 @@ export class DocumentDO extends YServer {
           resolvedFlag ? 'comment.resolved' : 'comment.unresolved',
           { markId, by },
           by,
+          operator,
         );
         return this.opSuccess(eventId, markId);
       }
@@ -1104,6 +1138,7 @@ export class DocumentDO extends YServer {
         const mark: OpStoredMark = {
           kind,
           by,
+          ...(operator ? { operator } : {}),
           createdAt: now,
           quote: meta.quote,
           status: 'pending',
@@ -1121,9 +1156,10 @@ export class DocumentDO extends YServer {
           'suggestion.added',
           { markId, by, kind, quote: meta.quote },
           by,
+          operator,
         );
         if (status === 'accepted') {
-          const finalized = await this.finalizeSuggestion(markId, 'accepted', by);
+          const finalized = await this.finalizeSuggestion(markId, 'accepted', by, operator);
           if (finalized.status !== 200) return finalized;
           return {
             status: 200,
@@ -1143,6 +1179,7 @@ export class DocumentDO extends YServer {
           markId,
           op === 'suggestion.accept' ? 'accepted' : 'rejected',
           by,
+          operator,
         );
       }
 
@@ -1214,6 +1251,7 @@ export class DocumentDO extends YServer {
             this.setMark(crypto.randomUUID(), {
               kind: 'authored',
               by,
+              ...(operator ? { operator } : {}),
               createdAt: now,
               quote: meta.quote,
               ...(meta.startRel ? { startRel: meta.startRel } : {}),
@@ -1225,6 +1263,7 @@ export class DocumentDO extends YServer {
           'document.rewritten',
           { by, mode: validated.mode },
           by,
+          operator,
         );
         const result = await this.opSuccess(eventId, '', {
           connectedClients: [...this.getConnections()].length,
@@ -1252,6 +1291,7 @@ export class DocumentDO extends YServer {
     markId: string,
     status: 'accepted' | 'rejected',
     by: string,
+    operator: string | null = null,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
     const map = this.document.getMap('marks');
     const existing = map.get(markId) as OpStoredMark | undefined;
@@ -1301,6 +1341,7 @@ export class DocumentDO extends YServer {
       status === 'accepted' ? 'suggestion.accepted' : 'suggestion.rejected',
       { markId, status, by },
       by,
+      operator,
     );
     return this.opSuccess(eventId, markId, {
       status,
@@ -1360,7 +1401,12 @@ export class DocumentDO extends YServer {
         canonicalizeStoredMarks(body.marks as Record<string, StoredMark>) as Record<string, unknown>,
       );
     }
-    const eventId = this.addEvent('document.updated', { by: gate.actor }, gate.actor);
+    const eventId = this.addEvent(
+      'document.updated',
+      { by: gate.actor },
+      gate.actor,
+      gate.operator,
+    );
     const result = await this.opSuccess(eventId, '', {});
     const { markId: _unused, ...resultBody } = result.body;
     return Response.json({ ...resultBody, content: resultBody.markdown });
@@ -1406,6 +1452,7 @@ export class DocumentDO extends YServer {
       'document.title.updated',
       { title: doc.title === null ? null : String(doc.title), by: gate.actor },
       gate.actor,
+      gate.operator,
     );
     return Response.json({
       success: true,
@@ -1417,7 +1464,7 @@ export class DocumentDO extends YServer {
   /** Shared auth gate for REST write routes: editor or owner required. */
   private async gateWriteRequest(
     request: Request,
-  ): Promise<{ denied: Response | null; actor: string }> {
+  ): Promise<{ denied: Response | null; actor: string; operator: string | null }> {
     const doc = this.row();
     if (!doc) {
       return {
@@ -1426,13 +1473,14 @@ export class DocumentDO extends YServer {
           { status: 404 },
         ),
         actor: 'ai:unknown',
+        operator: null,
       };
     }
     const role = await this.resolveRole(request.headers.get('x-proof-secret-hash'));
     const denied = authorizeDocumentOp('rewrite.apply', role, String(doc.share_state));
     return {
       denied: denied ? Response.json(denied.body, { status: denied.status }) : null,
-      actor: this.deriveOpActor(request),
+      ...this.deriveOpIdentity(request),
     };
   }
 

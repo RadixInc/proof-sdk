@@ -21,6 +21,7 @@
     "test:durability": "tsx src/tests/worker-durability.test.ts",
     "test:human-identity": "tsx src/tests/worker-human-identity.test.ts",
     "test:agent-ops": "tsx src/tests/worker-agent-ops.test.ts",
+    "test:delegated-identity": "tsx src/tests/worker-delegated-identity.test.ts",
     "test:share-lifecycle": "tsx src/tests/worker-share-lifecycle.test.ts",
     "test:r2-snapshots": "tsx src/tests/worker-r2-snapshots.test.ts",
     "test:library": "tsx src/tests/worker-library.test.ts",
