@@ -8,7 +8,7 @@ A self-hosted, coding-agent-friendly documentation collaboration tool: humans an
 
 - A single Cloudflare Worker (plus Durable Objects) serves the editor, API, and realtime collaboration; no Node servers, no containers.
 - Any SSO-authenticated human opens `/d/:slug` and collaborates in real time, attributed by their corporate identity.
-- Any authorized agent (laptop, CI, cloud) drives documents through the unchanged public agent HTTP contract (`AGENT_CONTRACT.md`) using an Access service token plus per-document tokens.
+- Any authorized agent (laptop, CI, cloud) drives documents through the unchanged public agent HTTP contract (`AGENT_CONTRACT.md`), admitted at the edge either by an Access service token (autonomous agents) or by its Operator's delegated Access JWT via cloudflared (agents run by a person in the org), plus per-document tokens. (ADR: delegated-agent-identity-operator-provenance)
 - Deploys happen via Cloudflare Workers Builds from `main` (production) and non-production branches (preview/staging); GitHub Actions runs tests only.
 
 ## Architecture (decided — see docs/adr/)
@@ -25,6 +25,7 @@ A self-hosted, coding-agent-friendly documentation collaboration tool: humans an
 - The Worker verifies the Access JWT (signature, AUD, issuer) on every request — headers are never trusted bare, so a DNS/origin bypass cannot forge identity.
 - Per-document tokens (`ownerSecret`, document tokens) remain the authorization layer beneath Access; secrets are stored hashed, compared timing-safe.
 - Agent capability is bounded by document role; owner-level operations require the owner secret.
+- A delegated agent's self-declaration (`x-agent-id`) is provenance, never a security boundary: the authenticated identity is its Operator's, so authorization never branches on the declaration.
 - No telemetry leaves the deployment; the bug-report bridge posts only to a deployer-configured GitHub repository.
 - The repo is public and deployment-agnostic: no organization-specific values (hostnames, IDs, team domains, secrets) are ever committed — see docs/adr/2026-07-deployment-agnostic-public-core.md and CLAUDE.md.
 
