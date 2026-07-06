@@ -153,6 +153,13 @@ async function main() {
     ok('autonomous event actor is ai:<serviceTokenId>', autonomousEvent?.actor === 'ai:ci-bot', autonomousEvent);
     ok('autonomous event has no operator key', !!autonomousEvent && !('operator' in autonomousEvent), autonomousEvent);
 
+    // Editor boot response declares the deployment's edge-auth story.
+    const openRes = await fetch(`${BASE}/documents/${slug}/open-context`, {
+      headers: { 'x-dev-identity': OPERATOR_EMAIL, 'x-share-token': token },
+    });
+    const openBody = (await openRes.json()) as Record<string, any>;
+    ok('open-context reports authMode dev', openBody.authMode === 'dev', openBody.authMode);
+
     console.log(`\nworker-delegated-identity: all ${passed} assertions passed`);
   } finally {
     worker.stop();

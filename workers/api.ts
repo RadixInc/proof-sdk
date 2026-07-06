@@ -46,6 +46,17 @@ export interface ApiEnv extends BugReportEnv {
   PROOF_DEFAULT_HUMAN_ROLE?: string;
   SNAPSHOTS?: R2Bucket;
   PROOF_SNAPSHOT_PREFIX?: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
+}
+
+/**
+ * Which edge-auth story this deployment has: 'access' whenever Cloudflare
+ * Access is configured (every real deployment), 'dev' for local dev
+ * identity injection. Mirrors resolveIdentity's configuration branch.
+ */
+function resolveAuthMode(env: ApiEnv): 'access' | 'dev' {
+  return env.ACCESS_TEAM_DOMAIN?.trim() && env.ACCESS_AUD?.trim() ? 'access' : 'dev';
 }
 
 /** Absolute snapshot URL when the R2 binding is configured, else null. */
@@ -719,8 +730,9 @@ async function handleOpenContext(
   }
 
   // Library visit tracking (issue #15): write-behind so the open path
-  // never blocks on D1.
-  if (identity.kind === 'human' && ctx) {
+  // never blocks on D1. Delegated agents are excluded — a visit means a
+  // person opened the document, not that their agent read it.
+  if (identity.kind === 'human' && !identity.delegatedAgentId && ctx) {
     ctx.waitUntil(recordVisit(env.DB, identity.email, slug, role));
   }
 
@@ -748,6 +760,9 @@ async function handleOpenContext(
     ...('session' in collab
       ? { session: collab.session, capabilities: collab.capabilities }
       : { collabAvailable: false, capabilities: capabilitiesForRole(role) }),
+    // Additive: tells the editor which edge-auth story the deployment has,
+    // so the agent invite prompt can be honest about it (issue #43).
+    authMode: resolveAuthMode(env),
     links: {
       webUrl: base ? `${base}/d/${state.slug}` : `/d/${state.slug}`,
       snapshotUrl: buildSnapshotUrl(request, env, state.slug),
