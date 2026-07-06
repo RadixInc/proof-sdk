@@ -14,7 +14,7 @@
 
 import { applyLocalMigrations, finish, startWorker } from './worker-harness';
 
-const PORT = 8987;
+const PORT = 8989;
 const BASE = `http://127.0.0.1:${PORT}`;
 const CREATOR = { 'x-dev-agent': 'creator-bot', 'content-type': 'application/json' };
 const OPERATOR_EMAIL = 'operator@example.com';

@@ -32,6 +32,8 @@ jobs:
       - run: npm run test:human-identity
       # Agent ops: live mark propagation into connected editors.
       - run: npm run test:agent-ops
+      # Delegated agent identity: x-agent-id, operator provenance, /agent-docs.
+      - run: npm run test:delegated-identity
       # Share lifecycle: pause/resume/revoke, epochs, token elevation.
       - run: npm run test:share-lifecycle
       # R2 HTML snapshots: publish, refresh, share-state gating.
