@@ -11,8 +11,12 @@ A person authenticated by corporate SSO through Cloudflare Access; identified by
 _Avoid_: user (ambiguous with agents), member
 
 **Agent**:
-A non-human client (coding agent, CI job, automation) that operates on documents through the agent bridge; admitted at the edge by an Access service token and authorized per document by a document token.
+A non-human client (coding agent, CI job, automation) that operates on documents through the agent bridge. Admitted at the edge either by its own Access service token or by its Operator's delegated credential; authorized per document by a document token or its Operator's role.
 _Avoid_: bot, service
+
+**Operator**:
+The human whose credential admits a delegated Agent and on whose behalf it acts. An Agent with an Operator is still an Agent for provenance; the Operator identifies who ran it. The Human/Agent distinction under a shared credential is honest self-declaration, not a security boundary — the authenticated identity is the Operator either way.
+_Avoid_: owner (collides with document ownership), supervisor
 
 ### Access & identity
 
@@ -42,7 +46,7 @@ The short public identifier of a document, used in URLs and as the collaboration
 An annotation anchored to a document range: a comment, suggestion, or provenance span.
 
 **Provenance**:
-The record of which actor authored which spans of a document.
+The record of which actor authored which spans of a document; for a delegated Agent it also records the Operator.
 
 **Projection**:
 The derived read model of a document (markdown, marks, plain text) computed from the canonical collaborative state.

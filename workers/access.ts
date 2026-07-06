@@ -11,6 +11,15 @@
  *  - human: an SSO user (JWT carries their email)
  *  - agent: an Access service token (JWT carries the token's common_name)
  *
+ * A human identity may carry a delegated-agent declaration: an agent
+ * admitted with its Operator's Access JWT self-declares via the
+ * `x-agent-id` header. The declaration is provenance, never authorization
+ * — the security identity stays the Operator's, so it is an annotation on
+ * the human identity rather than a third kind, and no role logic may
+ * branch on it (docs/adr/2026-07-delegated-agent-identity-operator-
+ * provenance.md). It is ignored on service-token identities: their
+ * common_name is the sole source of agent identity.
+ *
  * Dev mode: when ACCESS_TEAM_DOMAIN is configured, dev injection is
  * structurally unreachable. Only when Access is NOT configured AND
  * PROOF_DEV_MODE=1 do we mint a dev identity (for `wrangler dev`).
@@ -21,7 +30,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { JWTVerifyGetKey } from 'jose';
 
 export type Identity =
-  | { kind: 'human'; email: string; source: 'access' | 'dev' }
+  | { kind: 'human'; email: string; source: 'access' | 'dev'; delegatedAgentId?: string }
   | { kind: 'agent'; serviceTokenId: string; source: 'access' | 'dev' };
 
 export interface AccessEnv {
@@ -37,6 +46,26 @@ export interface AccessEnv {
 
 const JWT_HEADER = 'cf-access-jwt-assertion';
 const JWT_COOKIE = 'CF_Authorization';
+const AGENT_ID_HEADER = 'x-agent-id';
+
+/**
+ * Validate a self-declared agent id. Length-capped and charset-restricted
+ * so it cannot smuggle structure into actor strings or UI; anything that
+ * fails validation is treated as absent (the request proceeds as a plain
+ * human — misdeclaring never blocks, per the honesty-based model).
+ */
+function extractDelegatedAgentId(request: Request): string | null {
+  const raw = request.headers.get(AGENT_ID_HEADER)?.trim();
+  if (!raw) return null;
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(raw) ? raw : null;
+}
+
+/** Attach the delegated-agent declaration to a resolved human identity. */
+function withDelegation(identity: Identity, request: Request): Identity {
+  if (identity.kind !== 'human') return identity;
+  const delegatedAgentId = extractDelegatedAgentId(request);
+  return delegatedAgentId ? { ...identity, delegatedAgentId } : identity;
+}
 
 /** One JWKS fetcher per team domain, cached for the isolate's lifetime. */
 const jwksCache = new Map<string, JWTVerifyGetKey>();
@@ -120,7 +149,8 @@ export async function resolveIdentity(
   if (teamDomain && aud) {
     const token = extractToken(request);
     if (!token) return null;
-    return verifyAccessJwt(token, { teamDomain, aud }, getKey);
+    const identity = await verifyAccessJwt(token, { teamDomain, aud }, getKey);
+    return identity ? withDelegation(identity, request) : null;
   }
 
   // Access not configured: dev injection only with the explicit flag.
@@ -128,14 +158,20 @@ export async function resolveIdentity(
   if (env.PROOF_DEV_MODE === '1') {
     const humanHeader = request.headers.get('x-dev-identity');
     if (humanHeader && humanHeader.includes('@')) {
-      return { kind: 'human', email: humanHeader, source: 'dev' };
+      return withDelegation(
+        { kind: 'human', email: humanHeader, source: 'dev' },
+        request,
+      );
     }
     const agentHeader = request.headers.get('x-dev-agent');
     if (agentHeader) {
       return { kind: 'agent', serviceTokenId: agentHeader, source: 'dev' };
     }
     if (env.DEV_IDENTITY && env.DEV_IDENTITY.includes('@')) {
-      return { kind: 'human', email: env.DEV_IDENTITY, source: 'dev' };
+      return withDelegation(
+        { kind: 'human', email: env.DEV_IDENTITY, source: 'dev' },
+        request,
+      );
     }
     return null;
   }

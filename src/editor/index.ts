@@ -3817,14 +3817,14 @@ class ProofEditorImpl implements ProofEditor {
     const body = document.createElement('div');
     body.style.cssText = 'padding:14px 16px 16px 16px;color:rgba(255,255,255,0.86);font-size:12px;line-height:1.5;';
     body.innerHTML = `
-      <p style="margin:0 0 10px 0;">Agent collaborators can suggest and edit with the same permissions as the link you share.</p>
+      <p style="margin:0 0 10px 0;">Agent collaborators can suggest and edit with the same permissions as the link you share. Their edits are attributed to the agent, with you recorded as the operator.</p>
       <p style="margin:0 0 8px 0;"><strong>How to connect:</strong></p>
       <ol style="margin:0 0 10px 18px;padding:0;">
-        <li>Copy the agent invite link.</li>
-        <li>Paste it into your AI tool (for example, ChatGPT or Claude).</li>
-        <li>The agent appears here when connected.</li>
+        <li>Copy the agent invite.</li>
+        <li>Paste it into an agent run by someone in your organization (it signs in through your SSO via cloudflared), or one provisioned with an Access service token.</li>
+        <li>The agent's contributions appear in the doc as it works.</li>
       </ol>
-      <p style="margin:0;color:rgba(255,255,255,0.72);">Disconnect removes live presence from this doc, but does not revoke the link.</p>
+      <p style="margin:0;color:rgba(255,255,255,0.72);">This deployment sits behind your organization's access layer — agents outside it (for example, a third-party chat session with no way to sign in) cannot connect.</p>
     `;
 
     panel.append(header, body);
@@ -3938,6 +3938,17 @@ class ProofEditorImpl implements ProofEditor {
     }
   }
 
+  /**
+   * Agent invite bootstrap (issue #43): auth + a pointer to the served
+   * /agent-docs, which is the canonical behavioral contract. The prompt
+   * deliberately does not teach endpoints beyond the first state read —
+   * inlining the contract into a clipboard is how instruction drift
+   * happens. Deployment-aware: Access deployments need an edge credential
+   * (cloudflared delegated JWT or a provisioned service token) on top of
+   * the document token; dev mode uses dev identity injection. When the
+   * mode is unknown we assume Access — every real deployment runs it, and
+   * overpromising is the failure mode this feature had.
+   */
   private getAgentInviteMessage(): string {
     const shareUrl = this.getCanonicalShareUrl();
     const slug = shareClient.getSlug() || this.extractShareSlugFromUrl(shareUrl);
@@ -3959,33 +3970,60 @@ class ProofEditorImpl implements ProofEditor {
     }
 
     const encodedSlug = encodeURIComponent(slug);
-    const presenceUrl = `${origin}/api/agent/${encodedSlug}/presence`;
-    const stateUrl = `${origin}/api/agent/${encodedSlug}/state`;
-    const opsUrl = `${origin}/api/agent/${encodedSlug}/ops`;
-    const editUrl = `${origin}/api/agent/${encodedSlug}/edit`;
+    const stateUrl = `${origin}/documents/${encodedSlug}/state`;
+    const docsUrl = `${origin}/agent-docs`;
+    const isDev = shareClient.getAuthMode() === 'dev';
+
+    const authLines = isDev
+      ? [
+          'Auth headers for every API request (local dev deployment):',
+          `- x-share-token: ${token || '<token from the ?token= query param of the Doc URL>'}`,
+          `- x-dev-identity: ${this.getVerifiedIdentityEmail() || '<your email>'}`,
+          '- x-agent-id: <a short stable id for yourself, e.g. claude-code>',
+        ]
+      : [
+          'This deployment is behind Cloudflare Access. Every API request',
+          'needs BOTH auth layers:',
+          '',
+          '1) Edge credential — either:',
+          '   - Access service-token headers, if provisioned for this',
+          '     deployment: CF-Access-Client-Id / CF-Access-Client-Secret',
+          '   - or a delegated token as the person inviting you:',
+          `       cloudflared access login ${origin}`,
+          `       cloudflared access token --app=${origin}`,
+          '     sent as a cf-access-token header. Re-run on 401 (it expires).',
+          '',
+          '2) Document token:',
+          `   - x-share-token: ${token || '<token from the ?token= query param of the Doc URL>'}`,
+          '',
+          'Also send on every request:',
+          '- x-agent-id: <a short stable id for yourself, e.g. claude-code>',
+          '  (attributes your edits to you as an agent acting on behalf of',
+          '  the person who invited you)',
+        ];
 
     return [
       'Collaborate with me on this Proof doc.',
       '',
       `Doc: ${shareUrl}`,
       '',
-      'Auth for each API request:',
-      `- x-share-token: ${token || '<token-from-doc-url>'}`,
-      '- X-Agent-Id: <your-agent-id>',
-      '- (Use the token from the Doc URL query param: ?token=...)',
+      ...authLines,
       '',
-      'Start here:',
-      '1) Read current document state with your identity header:',
-      `   GET ${stateUrl}`,
-      '   header: X-Agent-Id: <your-agent-id>',
-      '2) Optionally set your friendly name in presence:',
-      `   POST ${presenceUrl}`,
-      '   body: {"agentId":"<your-agent-id>","name":"<your-name>","status":"active"}',
-      '3) If edits/comments are useful based on state, apply them with:',
-      `   POST ${opsUrl}`,
-      `   or POST ${editUrl}`,
-      '4) Then reply briefly with what you changed or suggest next steps.',
+      'Before doing anything else, read the agent docs served by this',
+      `deployment and follow them: GET ${docsUrl}`,
+      '',
+      `Then read the current document state: GET ${stateUrl}`,
+      'When you are done, reply briefly with what you changed.',
     ].join('\n');
+  }
+
+  /** Verified SSO email from the collab session, when present. */
+  private getVerifiedIdentityEmail(): string | null {
+    const actor = getCurrentActor();
+    if (actor?.startsWith('human:') && actor.includes('@')) {
+      return actor.slice('human:'.length).trim() || null;
+    }
+    return null;
   }
 
   private async copyAgentInviteWithFallback(): Promise<boolean> {

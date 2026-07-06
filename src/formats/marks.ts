@@ -128,6 +128,8 @@ export interface MarkRange {
 
 export interface CommentReply {
   by: string;
+  /** Operator email when `by` is a delegated agent acting on a human's behalf. */
+  operator?: string;
   text: string;
   at: string;
 }
@@ -212,6 +214,8 @@ export interface MarksDocument {
 export interface StoredMark {
   kind?: MarkKind;
   by?: string;
+  /** Operator email when `by` is a delegated agent acting on a human's behalf. */
+  operator?: string;
   createdAt?: string;
   range?: MarkRange;
   /** Relative anchor start (char-offset form: `char:<offset>`). */

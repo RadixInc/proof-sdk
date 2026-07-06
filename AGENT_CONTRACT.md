@@ -106,6 +106,26 @@ Ship the rewrite.
 - `disabled`
 - `auto`
 
+## Delegated Agent Identity (additive)
+
+Deployments may sit behind an edge access layer (out of this contract's
+scope) where an agent is admitted either with its own machine credential
+or with a credential belonging to the human it works for. In the second
+case the agent declares itself:
+
+- `x-agent-id: <id>` — optional request header, sent on every request. An
+  identifier of the acting agent: 1–64 chars, `[A-Za-z0-9._-]`, starting
+  alphanumeric. Invalid values are ignored (never an error). The header
+  has **no effect on authorization**; it is provenance only. It is also
+  ignored when the edge identity is already a machine credential.
+- `operator` — optional response field, additive alongside every existing
+  `actor`/`by` attribution (events, comment/suggestion/authored marks,
+  comment replies): the email of the human on whose behalf a declared
+  agent acted. Absent everywhere except delegated-agent actions. Actor
+  string formats (`ai:<agentId>`, `human:<email>`) are unchanged.
+- `GET /agent-docs` — serves the deployment's canonical agent
+  instructions (markdown), including its edge-auth specifics.
+
 ## Minimal Agent Flow
 
 1. `POST /documents`
