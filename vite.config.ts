@@ -4,7 +4,7 @@ import { resolve } from 'path';
 export default defineConfig({
   root: 'src',
   publicDir: resolve(__dirname, 'public'),
-  base: './',  // Use relative paths for self-hosted embedding
+  base: '/',
   build: {
     outDir: '../dist',
     emptyOutDir: true,
