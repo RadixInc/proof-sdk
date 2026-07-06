@@ -3806,7 +3806,7 @@ class ProofEditorImpl implements ProofEditor {
     const header = document.createElement('div');
     header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.10)';
     const title = document.createElement('div');
-    title.textContent = 'Use an agent collaborator in this doc';
+    title.textContent = 'Use a coding agent in this doc';
     title.style.cssText = 'font-size:13px;font-weight:700;letter-spacing:0.02em';
     const close = document.createElement('button');
     close.type = 'button';
@@ -3817,14 +3817,14 @@ class ProofEditorImpl implements ProofEditor {
     const body = document.createElement('div');
     body.style.cssText = 'padding:14px 16px 16px 16px;color:rgba(255,255,255,0.86);font-size:12px;line-height:1.5;';
     body.innerHTML = `
-      <p style="margin:0 0 10px 0;">Agent collaborators can suggest and edit with the same permissions as the link you share. Their edits are attributed to the agent, with you recorded as the operator.</p>
+      <p style="margin:0 0 10px 0;">Coding agents can suggest and edit with the same permissions as the link you share. Their edits are attributed to the agent, with you recorded as the operator.</p>
       <p style="margin:0 0 8px 0;"><strong>How to connect:</strong></p>
       <ol style="margin:0 0 10px 18px;padding:0;">
         <li>Copy the agent invite.</li>
-        <li>Paste it into an agent run by someone in your organization (it signs in through your SSO via cloudflared), or one provisioned with an Access service token.</li>
+        <li>Paste it into a coding agent run by someone in your organization (it signs in through your SSO via cloudflared), or one provisioned with an Access service token.</li>
         <li>The agent's contributions appear in the doc as it works.</li>
       </ol>
-      <p style="margin:0;color:rgba(255,255,255,0.72);">This deployment sits behind your organization's access layer — agents outside it (for example, a third-party chat session with no way to sign in) cannot connect.</p>
+      <p style="margin:0;color:rgba(255,255,255,0.72);">This needs a coding agent — one that can run shell commands and make direct HTTP requests, like Claude Code. A chat assistant without those tools cannot connect, and neither can agents outside your organization's access layer.</p>
     `;
 
     panel.append(header, body);
@@ -3948,6 +3948,11 @@ class ProofEditorImpl implements ProofEditor {
    * the document token; dev mode uses dev identity injection. When the
    * mode is unknown we assume Access — every real deployment runs it, and
    * overpromising is the failure mode this feature had.
+   *
+   * Wording constraint: point at /agent-docs as reference material to
+   * consult, never "fetch X and follow it" — instruction-shaped pointers
+   * to remote content pattern-match to prompt injection and make
+   * well-aligned agents refuse the whole invite.
    */
   /**
    * Invite auth context: prefer the token already in the URL; in a
@@ -4032,10 +4037,16 @@ class ProofEditorImpl implements ProofEditor {
       '',
       `Doc: ${shareUrl}`,
       '',
+      'This is an HTTP API workflow — you will need to run shell commands',
+      'and make direct HTTP requests (curl or similar). If you cannot,',
+      'say so instead of improvising.',
+      '',
       ...authLines,
       '',
-      'Before doing anything else, read the agent docs served by this',
-      `deployment and follow them: GET ${docsUrl}`,
+      'This deployment publishes its API reference and collaboration',
+      `guidelines at: GET ${docsUrl}`,
+      'Fetch that first — it documents the endpoints, op formats, and',
+      'etiquette expected here.',
       '',
       `Then read the current document state: GET ${stateUrl}`,
       'When you are done, reply briefly with what you changed.',
@@ -4453,7 +4464,7 @@ class ProofEditorImpl implements ProofEditor {
         btn.style.background = 'transparent';
       };
     } else {
-      btn.setAttribute('aria-label', 'Add agent');
+      btn.setAttribute('aria-label', 'Add coding agent');
       btn.style.cssText = `
         display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;min-width:44px;padding:0 12px;
         background:rgba(255,255,255,0.7);border:1px solid rgba(17,24,39,0.10);border-radius:22px;color:#111827;
@@ -4467,7 +4478,7 @@ class ProofEditorImpl implements ProofEditor {
 
       const label = document.createElement('span');
       label.className = 'agent-btn-label';
-      label.textContent = 'Add agent';
+      label.textContent = 'Add coding agent';
       label.style.cssText = 'font-size:12px;font-weight:600;line-height:1;';
       btn.appendChild(label);
 
@@ -4556,10 +4567,10 @@ class ProofEditorImpl implements ProofEditor {
       const agentsNow = this.getConnectedAgentEntries();
       if (agentsNow.length === 0) {
         const header = document.createElement('div');
-        header.textContent = 'Add an agent';
+        header.textContent = 'Add a coding agent';
         header.style.cssText = 'padding:8px 12px 4px;color:#fff;font-size:13px;font-weight:700;';
         const body = document.createElement('div');
-        body.textContent = 'Invite an agent collaborator to edit, suggest, and review this doc.';
+        body.textContent = 'Invite a coding agent — one that can run shell commands and make HTTP requests, like Claude Code — to edit, suggest, and review this doc.';
         body.style.cssText = 'padding:0 12px 8px;color:rgba(255,255,255,0.78);font-size:12px;line-height:1.35;';
         menu.append(header, body);
         addMenuButton('Copy agent invite link', async () => this.copyAgentInviteWithFallback(), {
