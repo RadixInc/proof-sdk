@@ -16,6 +16,7 @@ import type { Identity } from './access';
 import { resolveCollabSigningSecret, signCollabToken } from './collab-token';
 import type { DocumentDO } from './document-do';
 import { buildProofSdkAgentDescriptor, buildProofSdkLinks } from './sdk-links';
+import { renderSnapshotHtml, snapshotObjectKey, snapshotPublicPath } from './snapshot';
 import {
   generateSlug,
   getPresentedSecret,
@@ -39,6 +40,16 @@ export interface ApiEnv {
   PROOF_DEV_MODE?: string;
   COLLAB_SESSION_TTL_SECONDS?: string;
   PROOF_DEFAULT_HUMAN_ROLE?: string;
+  SNAPSHOTS?: R2Bucket;
+  PROOF_SNAPSHOT_PREFIX?: string;
+}
+
+/** Absolute snapshot URL when the R2 binding is configured, else null. */
+function buildSnapshotUrl(request: Request, env: ApiEnv, slug: string): string | null {
+  if (!env.SNAPSHOTS) return null;
+  const base = getPublicBaseUrl(request, env);
+  const path = snapshotPublicPath(slug);
+  return base ? `${base}${path}` : path;
 }
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // matches upstream express limits
@@ -174,7 +185,7 @@ async function createDocument(
     accessRole: fields.role,
     active: true,
     shareState: 'ACTIVE',
-    snapshotUrl: null,
+    snapshotUrl: buildSnapshotUrl(request, env, slug),
     createdAt,
     _links: {
       view: path,
@@ -728,10 +739,10 @@ async function handleOpenContext(
       : { collabAvailable: false, capabilities: capabilitiesForRole(role) }),
     links: {
       webUrl: base ? `${base}/d/${state.slug}` : `/d/${state.slug}`,
-      snapshotUrl: null,
+      snapshotUrl: buildSnapshotUrl(request, env, state.slug),
     },
     mutationBase: null,
-    snapshotUrl: null,
+    snapshotUrl: buildSnapshotUrl(request, env, state.slug),
   });
 }
 
@@ -769,7 +780,55 @@ async function handleLifecycle(
     identity.kind === 'agent' ? `agent:${identity.serviceTokenId}` : 'owner';
   const result = await stub.setShareState(LIFECYCLE_TARGET_STATE[verb], actor);
   if (!result) return json({ success: false, error: 'Document not found' }, 404);
-  return json({ success: true, shareState: result.shareState, snapshotUrl: null });
+  return json({
+    success: true,
+    shareState: result.shareState,
+    snapshotUrl:
+      result.shareState === 'ACTIVE' ? buildSnapshotUrl(request, env, slug) : null,
+  });
+}
+
+/**
+ * GET /snapshots/:slug.html — serve the read-only artifact from R2, behind
+ * the edge identity gate. Access to the snapshot follows the document's
+ * share state (paused/revoked stop serving for non-owners); no document
+ * token is required for ACTIVE docs, matching the lenient document read.
+ */
+async function handleSnapshotRead(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+): Promise<Response> {
+  if (!env.SNAPSHOTS) {
+    return json({ success: false, error: 'Snapshots are not configured' }, 404);
+  }
+  const { state, role } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  if (state.shareState === 'DELETED') {
+    return json({ success: false, error: 'Document deleted' }, 410);
+  }
+  if (state.shareState !== 'ACTIVE' && role !== 'owner_bot') {
+    return json(
+      { success: false, error: 'Document is not currently accessible' },
+      403,
+    );
+  }
+  const key = snapshotObjectKey(slug, env.PROOF_SNAPSHOT_PREFIX);
+  const object = await env.SNAPSHOTS.get(key);
+  const html = object
+    ? await object.text()
+    : renderSnapshotHtml({
+        title: state.title,
+        markdown: state.markdown,
+        slug: state.slug,
+        updatedAt: state.updatedAt,
+      });
+  return new Response(html, {
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'private, max-age=60',
+    },
+  });
 }
 
 /** POST /documents/:slug/access-links — mint an above-default token. */
@@ -980,6 +1039,11 @@ export async function handleApiRequest(
     path.match(/^\/api\/agent\/([a-z0-9-]+)\/ops$/);
   if (method === 'POST' && opsMatch) {
     return forwardToDocumentDo(request, env, opsMatch[1], _identity, '/internal/ops');
+  }
+
+  const snapshotMatch = path.match(/^\/snapshots\/([a-z0-9-]+)\.html$/);
+  if (method === 'GET' && snapshotMatch) {
+    return handleSnapshotRead(request, env, snapshotMatch[1]);
   }
 
   const lifecycleMatch = path.match(

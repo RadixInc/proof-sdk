@@ -34,6 +34,8 @@ jobs:
       - run: npm run test:agent-ops
       # Share lifecycle: pause/resume/revoke, epochs, token elevation.
       - run: npm run test:share-lifecycle
+      # R2 HTML snapshots: publish, refresh, share-state gating.
+      - run: npm run test:r2-snapshots
 
   leak-scan:
     runs-on: ubuntu-latest
