@@ -13,6 +13,7 @@
 import { getServerByName } from 'partyserver';
 import { canonicalizeStoredMarks } from '../src/formats/marks';
 import type { Identity } from './access';
+import { agentDocsResponse } from './agent-docs';
 import { resolveCollabSigningSecret, signCollabToken } from './collab-token';
 import type { DocumentDO } from './document-do';
 import { buildProofSdkAgentDescriptor, buildProofSdkLinks } from './sdk-links';
@@ -1051,6 +1052,13 @@ export async function handleApiRequest(
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
+
+  // Canonical agent docs (issue #43): every _links block advertises this
+  // path; serving it from the Worker keeps agent instructions versioned
+  // with the deploy so they cannot drift from the routes below.
+  if (method === 'GET' && path === '/agent-docs') {
+    return agentDocsResponse();
+  }
 
   // Personal library (issue #15): humans only, keyed by SSO email.
   if (method === 'GET' && (path === '/library' || path === '/api/library')) {

@@ -160,6 +160,23 @@ async function main() {
     const openBody = (await openRes.json()) as Record<string, any>;
     ok('open-context reports authMode dev', openBody.authMode === 'dev', openBody.authMode);
 
+    // /agent-docs is a real, identity-gated route serving markdown.
+    const docsRes = await fetch(`${BASE}/agent-docs`, {
+      headers: { 'x-dev-identity': OPERATOR_EMAIL },
+    });
+    const docsText = await docsRes.text();
+    ok(
+      'agent-docs served as markdown',
+      docsRes.status === 200 &&
+        (docsRes.headers.get('content-type') ?? '').includes('text/markdown') &&
+        docsText.includes('x-agent-id'),
+      docsRes.status,
+    );
+    // (No unauthenticated 401 assertion here: the route sits behind the
+    // same resolveIdentity gate as every API route — structural in
+    // workers/index.ts — and dev-mode DEV_IDENTITY in the harness's
+    // wrangler.jsonc would satisfy it anyway.)
+
     console.log(`\nworker-delegated-identity: all ${passed} assertions passed`);
   } finally {
     worker.stop();
