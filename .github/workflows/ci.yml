@@ -42,6 +42,9 @@ jobs:
       - run: npm run test:library
       # Bug-report bridge: env-configured filing against a mock GitHub API.
       - run: npm run test:bug-reports
+      # Share client mark mutations: accept/reject/resolve/unresolve route
+      # through the /ops envelope, not a nonexistent /marks/* REST path.
+      - run: npm run test:share-client-marks
 
   leak-scan:
     runs-on: ubuntu-latest
