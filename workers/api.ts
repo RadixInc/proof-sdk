@@ -17,6 +17,7 @@ import { resolveCollabSigningSecret, signCollabToken } from './collab-token';
 import type { DocumentDO } from './document-do';
 import { buildProofSdkAgentDescriptor, buildProofSdkLinks } from './sdk-links';
 import { renderSnapshotHtml, snapshotObjectKey, snapshotPublicPath } from './snapshot';
+import { queryLibrary, recordVisit, renderLibraryHtml } from './library';
 import {
   generateSlug,
   getPresentedSecret,
@@ -682,6 +683,7 @@ async function handleOpenContext(
   env: ApiEnv,
   slug: string,
   identity: Identity,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const { state, role: tokenRole } = await loadDocAndRole(request, env, slug);
   if (!state) return json({ success: false, error: 'Document not found' }, 404);
@@ -711,6 +713,12 @@ async function handleOpenContext(
       },
       401,
     );
+  }
+
+  // Library visit tracking (issue #15): write-behind so the open path
+  // never blocks on D1.
+  if (identity.kind === 'human' && ctx) {
+    ctx.waitUntil(recordVisit(env.DB, identity.email, slug, role));
   }
 
   const base = getPublicBaseUrl(request, env);
@@ -1012,10 +1020,31 @@ export async function handleApiRequest(
   request: Request,
   env: ApiEnv,
   _identity: Identity,
+  ctx?: ExecutionContext,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
+
+  // Personal library (issue #15): humans only, keyed by SSO email.
+  if (method === 'GET' && (path === '/library' || path === '/api/library')) {
+    if (_identity.kind !== 'human') {
+      return json(
+        { success: false, error: 'The library is per-human SSO identity' },
+        403,
+      );
+    }
+    const rows = await queryLibrary(env.DB, _identity.email);
+    if (path === '/api/library') {
+      return json({ success: true, user: _identity.email, documents: rows });
+    }
+    return new Response(renderLibraryHtml(_identity.email, rows), {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+      },
+    });
+  }
 
   if (method === 'POST' && (path === '/documents' || path === '/api/documents')) {
     return handleCanonicalCreate(request, env, path === '/api/documents');
@@ -1087,7 +1116,7 @@ export async function handleApiRequest(
     /^\/(?:api\/)?documents\/([a-z0-9-]+)\/open-context$/,
   );
   if (method === 'GET' && openContextMatch) {
-    return handleOpenContext(request, env, openContextMatch[1], _identity);
+    return handleOpenContext(request, env, openContextMatch[1], _identity, ctx);
   }
 
   const healthMatch = path.match(/^\/documents\/([a-z0-9-]+)\/projection-health$/);

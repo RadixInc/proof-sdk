@@ -36,6 +36,8 @@ jobs:
       - run: npm run test:share-lifecycle
       # R2 HTML snapshots: publish, refresh, share-state gating.
       - run: npm run test:r2-snapshots
+      # Personal library: per-identity visits, ownership attribution.
+      - run: npm run test:library
 
   leak-scan:
     runs-on: ubuntu-latest
