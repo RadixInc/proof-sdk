@@ -135,6 +135,7 @@ type KeepaliveMutationBaseSelection = {
 export type ShareEventHandler = (message: Record<string, unknown>) => void;
 export type ShareSocketState = 'connecting' | 'connected' | 'disconnected';
 type ShareConnectionStateHandler = (state: ShareSocketState) => void;
+export type ShareAuthInterceptionHandler = (intercepted: boolean) => void;
 
 export class ShareClient {
   private slug: string | null = null;
@@ -145,6 +146,8 @@ export class ShareClient {
   private ws: WebSocket | null = null;
   private eventHandlers: ShareEventHandler[] = [];
   private connectionStateHandlers: ShareConnectionStateHandler[] = [];
+  private authIntercepted = false;
+  private authInterceptionHandlers: ShareAuthInterceptionHandler[] = [];
   private connectionState: ShareSocketState = 'disconnected';
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private viewerName: string | null = null;
@@ -305,7 +308,62 @@ export class ShareClient {
     return headers;
   }
 
+  /**
+   * Detect an edge-auth interception: the deployment sits behind Cloudflare
+   * Access, and when a long-lived tab's SSO session expires, Access answers
+   * API fetches itself — a redirect chain ending in its login page — so the
+   * client sees an HTTP 200 whose body is HTML, and the Worker never sees
+   * the request. Without detection those responses parse to null and every
+   * mutation becomes a silent no-op (a 200 accept that resolves nothing).
+   * All API routes speak JSON (or 204), so a redirected or HTML response
+   * where JSON is expected can only be an auth wall.
+   */
+  private isAuthInterceptedResponse(response: Response): boolean {
+    if (response.status === 204 || response.status === 205) return false;
+    const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+    if (contentType.includes('json')) return false;
+    if (response.redirected) return true;
+    return contentType.includes('text/html');
+  }
+
+  private setAuthIntercepted(intercepted: boolean): void {
+    if (this.authIntercepted === intercepted) return;
+    this.authIntercepted = intercepted;
+    for (const handler of [...this.authInterceptionHandlers]) {
+      handler(intercepted);
+    }
+  }
+
+  /**
+   * Subscribe to auth-interception state changes (see
+   * isAuthInterceptedResponse). The handler fires immediately with the
+   * current state, then on every transition. The flag clears itself when a
+   * later API response parses as JSON again (e.g. the user re-authenticated
+   * in another tab).
+   */
+  onAuthInterception(handler: ShareAuthInterceptionHandler): () => void {
+    this.authInterceptionHandlers.push(handler);
+    handler(this.authIntercepted);
+    return () => {
+      this.authInterceptionHandlers = this.authInterceptionHandlers.filter((entry) => entry !== handler);
+    };
+  }
+
+  /** Read a JSON API response body, routing through auth-interception detection. */
+  private async readJsonPayload<T = Record<string, unknown>>(response: Response): Promise<T | null> {
+    if (this.isAuthInterceptedResponse(response)) {
+      this.setAuthIntercepted(true);
+      return null;
+    }
+    const payload = await response.json().catch(() => null) as T | null;
+    if (payload !== null) this.setAuthIntercepted(false);
+    return payload;
+  }
+
   private async parseRequestError(response: Response): Promise<ShareRequestError> {
+    if (this.isAuthInterceptedResponse(response)) {
+      this.setAuthIntercepted(true);
+    }
     const requestId = this.readRequestId(response);
     const body = await response.json().catch(() => ({} as {
       error?: unknown;
@@ -379,7 +437,7 @@ export class ShareClient {
       body: JSON.stringify({ type, payload: { markId, by } }),
     });
     if (!response.ok) return this.parseRequestError(response);
-    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const payload = await this.readJsonPayload(response);
     return this.parseShareMarkMutationResponse(payload);
   }
 
@@ -474,7 +532,8 @@ export class ShareClient {
         }
         throw new Error(`Failed to fetch document: ${response.status}`);
       }
-      const payload = await response.json() as ShareDocument;
+      const payload = await this.readJsonPayload<ShareDocument>(response);
+      if (!payload) throw new Error('Document response was not JSON');
       if (options?.preferPersisted !== true) {
         this.rememberObservedDocument(payload);
         this.rememberObservedMutationBase(payload as Record<string, unknown>);
@@ -501,7 +560,8 @@ export class ShareClient {
       body: JSON.stringify({ title }),
     });
     if (!response.ok) return this.parseRequestError(response);
-    const payload = await response.json() as { success?: boolean; title?: string | null; updatedAt?: string };
+    const payload = await this.readJsonPayload<{ success?: boolean; title?: string | null; updatedAt?: string }>(response);
+    if (!payload) return null;
     this.rememberObservedDocument(payload);
     this.rememberObservedMutationBase(payload as Record<string, unknown>);
     return {
@@ -519,13 +579,16 @@ export class ShareClient {
 
     const response = await fetch(`${this.getApiBase()}/documents/${this.slug}/collab-session`, { headers });
     if (!response.ok) return this.parseRequestError(response);
-    const payload = await response.json() as {
+    const payload = await this.readJsonPayload<{
       session?: CollabSessionInfo;
       capabilities?: { canRead: boolean; canComment: boolean; canEdit: boolean };
       collabAvailable?: boolean;
       snapshotUrl?: string | null;
-    };
-    if (payload?.collabAvailable === false) {
+      code?: unknown;
+      retryAfterMs?: unknown;
+    }>(response);
+    if (!payload) return null;
+    if (payload.collabAvailable === false) {
       return {
         collabAvailable: false,
         snapshotUrl: payload.snapshotUrl ?? null,
@@ -550,7 +613,7 @@ export class ShareClient {
     const headers = this.getShareAuthHeaders(options?.token);
     const response = await fetch(`${this.getApiBase()}/documents/${this.slug}/open-context`, { headers });
     if (!response.ok) return this.parseRequestError(response);
-    const payload = await response.json() as ShareOpenContext;
+    const payload = await this.readJsonPayload<ShareOpenContext>(response);
     if (!payload?.doc || !payload?.capabilities) return null;
     if (payload.session && !this.isCollabSessionInfo(payload.session)) return null;
     payload.requestId = this.readRequestId(response);
@@ -575,7 +638,7 @@ export class ShareClient {
       headers: this.getShareAuthHeaders(options?.token),
     });
     if (!response.ok) return this.parseRequestError(response);
-    const payload = await response.json() as {
+    const payload = await this.readJsonPayload<{
       success?: boolean;
       cursor?: number;
       events?: Array<{
@@ -587,7 +650,8 @@ export class ShareClient {
         ackedAt?: string | null;
         ackedBy?: string | null;
       }>;
-    };
+    }>(response);
+    if (!payload) return null;
     return {
       success: payload.success === true,
       cursor: typeof payload.cursor === 'number' && Number.isFinite(payload.cursor) ? payload.cursor : Math.max(0, Math.trunc(after)),
@@ -614,13 +678,16 @@ export class ShareClient {
       headers: this.getShareAuthHeaders(),
     });
     if (!response.ok) return this.parseRequestError(response);
-    const payload = await response.json() as {
+    const payload = await this.readJsonPayload<{
       session?: CollabSessionInfo;
       capabilities?: { canRead: boolean; canComment: boolean; canEdit: boolean };
       collabAvailable?: boolean;
       snapshotUrl?: string | null;
-    };
-    if (payload?.collabAvailable === false) {
+      code?: unknown;
+      retryAfterMs?: unknown;
+    }>(response);
+    if (!payload) return null;
+    if (payload.collabAvailable === false) {
       return {
         collabAvailable: false,
         snapshotUrl: payload.snapshotUrl ?? null,
@@ -652,7 +719,7 @@ export class ShareClient {
       body: JSON.stringify({ role }),
     });
     if (!response.ok) return this.parseRequestError(response);
-    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const payload = await this.readJsonPayload(response);
     const accessToken = (() => {
       if (!payload) return '';
       if (typeof payload.accessToken === 'string' && payload.accessToken.trim().length > 0) {
@@ -741,7 +808,7 @@ export class ShareClient {
       body: JSON.stringify({ agentId: trimmedAgentId }),
     });
     if (!response.ok) return this.parseRequestError(response);
-    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const payload = await this.readJsonPayload(response);
     return payload?.success === true && payload?.disconnected === true;
   }
 
@@ -861,7 +928,7 @@ export class ShareClient {
         keepalive: Boolean(options?.keepalive),
         body: JSON.stringify({ markdown, marks, actor, clientId: this.clientId, ...keepaliveBase.base }),
       });
-      const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+      const payload = await this.readJsonPayload(response);
       this.rememberObservedDocument(payload);
       this.rememberObservedMutationBase(payload);
       if (response.ok && keepaliveBase.reusedObservedBase) {
@@ -870,7 +937,8 @@ export class ShareClient {
           this.lastObservedMutationBase = null;
         }
       }
-      return response.ok;
+      // An intercepted 200 (Access login HTML) is not a successful push.
+      return response.ok && payload !== null;
     } catch (error) {
       console.error('[ShareClient] Failed to push update:', error);
       return false;

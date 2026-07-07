@@ -1026,6 +1026,7 @@ class ProofEditorImpl implements ProofEditor {
   private collabSessionRefreshInFlight: boolean = false;
   private shareOtherViewerCount: number = 0;
   private collabConnectionStatus: 'connecting' | 'connected' | 'disconnected' = 'disconnected';
+  private shareAuthIntercepted = false;
   private collabIsSynced: boolean = false;
   private collabUnsyncedChanges: number = 0;
   private collabPendingLocalUpdates: number = 0;
@@ -1511,6 +1512,11 @@ class ProofEditorImpl implements ProofEditor {
           this.shareOtherViewerCount = otherCount;
           this.updateShareBannerTitleDisplay();
           this.updateShareBannerPresenceDisplay();
+        });
+        shareClient.onAuthInterception((intercepted) => {
+          if (this.shareAuthIntercepted === intercepted) return;
+          this.shareAuthIntercepted = intercepted;
+          this.updateShareBannerSyncDisplay();
         });
         collabClient.onSyncStatus((status) => {
           this.updateCollabHealthWindow(status);
@@ -2758,6 +2764,12 @@ class ProofEditorImpl implements ProofEditor {
   }
 
   private getShareSyncStatus(): { label: string; color: string } {
+    // Access answered an API call with its login page: the SSO session is
+    // gone and every mutation from this tab is a silent no-op until the
+    // user reloads through SSO. Outranks every other status.
+    if (this.shareAuthIntercepted) {
+      return { label: 'Session expired - reload to sign in', color: '#ef4444' };
+    }
     if (!this.collabEnabled) {
       return { label: 'Live sync unavailable', color: '#ef4444' };
     }
@@ -2810,6 +2822,7 @@ class ProofEditorImpl implements ProofEditor {
       'Access revoked': 'Revoked',
       'Document is no longer shared': 'Unshared',
       'Live sync unavailable': 'No sync',
+      'Session expired - reload to sign in': 'Signed out',
     };
     return map[label] ?? 'Saved';
   }
