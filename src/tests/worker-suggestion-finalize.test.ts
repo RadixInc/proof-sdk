@@ -119,6 +119,16 @@ async function main() {
     ok('setup: second suggestion added', rejectTarget.status === 200, rejectTarget.body);
     const rejectId = rejectTarget.body.markId as string;
 
+    // Added while "quick brown fox" is still in the text, so this mark's
+    // stabilized target context embeds it — accepting the replace above
+    // goes on to invalidate that context.
+    const staleContextTarget = await postOp(slug, token, {
+      type: 'suggestion.add',
+      payload: { kind: 'insert', by: 'ai:reviewer', quote: 'lazy dog', content: ' (eventually)' },
+    });
+    ok('setup: insert suggestion added', staleContextTarget.status === 200, staleContextTarget.body);
+    const staleContextId = staleContextTarget.body.markId as string;
+
     // Accept: content applied AND anchor span dissolved from the markdown.
     const accepted = await postOp(slug, token, {
       type: 'suggestion.accept',
@@ -139,6 +149,23 @@ async function main() {
     ok('reject kept the original text', rejectedMarkdown.includes('second target sentence'));
     ok('reject did not apply the content', !rejectedMarkdown.includes('other clause'));
     ok('reject removed the anchor span', !rejectedMarkdown.includes(rejectId), rejectedMarkdown);
+
+    // Accepting a suggestion whose stabilized add-time context was
+    // invalidated by the earlier accept must still resolve (context is a
+    // disambiguator, not a veto) — this returned 409 ANCHOR_NOT_FOUND
+    // before the graduated fallback existed.
+    const staleAccepted = await postOp(slug, token, {
+      type: 'suggestion.accept',
+      payload: { markId: staleContextId, by: 'human:editor@example.com' },
+    });
+    ok(
+      'accept resolves despite stale add-time context',
+      staleAccepted.status === 200 && staleAccepted.body.marks?.[staleContextId]?.status === 'accepted',
+      staleAccepted.body,
+    );
+    const staleAcceptedMarkdown = String(staleAccepted.body.markdown ?? '');
+    ok('stale-context accept applied the content', staleAcceptedMarkdown.includes('(eventually)'));
+    ok('stale-context accept removed the anchor span', !staleAcceptedMarkdown.includes(staleContextId));
 
     // Resurrection attempt: a stale client deletes the finalized map entry
     // and re-adds it as pending — bypassing the value-overwrite guard.
