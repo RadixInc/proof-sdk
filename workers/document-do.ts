@@ -62,6 +62,7 @@ import type { DocumentOpType, OpStoredMark } from './ops';
 import {
   buildAcceptedSuggestionMarkdownFromSelection,
   buildStoredSelectionMetadata,
+  stripSuggestionSpansById,
 } from './visible-text';
 import { renderSnapshotHtml, snapshotObjectKey } from './snapshot';
 
@@ -167,6 +168,11 @@ export class DocumentDO extends YServer {
         owner_secret_hash TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS finalized_mark (
+        mark_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        finalized_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS document_access (
         token_id TEXT PRIMARY KEY,
@@ -359,6 +365,7 @@ export class DocumentDO extends YServer {
       this.persistUpdate(update);
     });
     this.observeHumanMarkActivity();
+    this.seedFinalizedMarksFromMap();
 
     // Self-heal: a crash between update persistence and the debounced
     // projection write leaves projected_seq behind — catch up now.
@@ -378,6 +385,7 @@ export class DocumentDO extends YServer {
         this.document.transact(() => {
           for (const [key, value] of Object.entries(marks)) marksMap.set(key, value);
         });
+        this.seedFinalizedMarksFromMap();
       } catch {
         // Corrupt marks JSON should not block collaboration on the text.
       }
@@ -896,6 +904,17 @@ export class DocumentDO extends YServer {
         const mark = marksMap.get(markId) as OpStoredMark | undefined;
         if (!mark || typeof mark !== 'object') continue;
         const by = typeof mark.by === 'string' ? mark.by : null;
+        if (suggestionKinds.has(String(mark.kind))) {
+          // A stale client can resurrect a finalized suggestion by deleting
+          // the map entry and re-adding it as "pending" — invisible to the
+          // value-level regression guard. The registry is authoritative:
+          // restore the finalized status and emit no event for the phantom.
+          const finalized = this.getFinalizedMarkStatus(markId);
+          if (finalized && mark.status !== finalized) {
+            this.setMark(markId, { ...mark, status: finalized });
+            continue;
+          }
+        }
         if (change.action === 'add') {
           if (mark.kind === 'comment') {
             this.addEvent(
@@ -1043,6 +1062,56 @@ export class DocumentDO extends YServer {
     this.document.transact(() => {
       this.document.getMap('marks').set(markId, mark);
     }, 'agent-op');
+  }
+
+  /**
+   * Durable record of every finalized suggestion. The marks map alone cannot
+   * defend a finalization: a stale client can delete the map entry and
+   * re-add it as "pending" (the value-level regression guard only sees
+   * overwrites), so the authoritative status has to live where clients
+   * cannot write — DO SQLite.
+   */
+  private recordFinalizedMark(markId: string, status: 'accepted' | 'rejected'): void {
+    this.store.exec(
+      'INSERT OR REPLACE INTO finalized_mark (mark_id, status, finalized_at) VALUES (?, ?, ?)',
+      markId,
+      status,
+      new Date().toISOString(),
+    );
+  }
+
+  private getFinalizedMarkStatus(markId: string): 'accepted' | 'rejected' | null {
+    const rows = this.store
+      .exec('SELECT status FROM finalized_mark WHERE mark_id = ?', markId)
+      .toArray();
+    const status = rows[0]?.status;
+    return status === 'accepted' || status === 'rejected' ? status : null;
+  }
+
+  /** Dissolve a finalized suggestion's leftover anchor span, if any. */
+  private async stripFinalizedMarkAnchor(markId: string): Promise<void> {
+    const doc = this.row();
+    if (!doc) return;
+    const markdown = String(doc.markdown);
+    const stripped = stripSuggestionSpansById(markdown, markId);
+    if (stripped === markdown) return;
+    const applied = await this.applyMarkdownToLiveDoc(stripped);
+    if (applied) await this.persistProjection();
+  }
+
+  /** Backfill for documents finalized before the registry existed. */
+  private seedFinalizedMarksFromMap(): void {
+    const marks = this.document.getMap('marks').toJSON() as Record<string, OpStoredMark>;
+    for (const [markId, mark] of Object.entries(marks)) {
+      if (mark?.status === 'accepted' || mark?.status === 'rejected') {
+        this.store.exec(
+          'INSERT OR IGNORE INTO finalized_mark (mark_id, status, finalized_at) VALUES (?, ?, ?)',
+          markId,
+          mark.status,
+          new Date().toISOString(),
+        );
+      }
+    }
   }
 
   /**
@@ -1452,7 +1521,11 @@ export class DocumentDO extends YServer {
       return { status: 404, body: { success: false, error: 'Mark not found' } };
     }
     if (existing.status === status) {
-      // Idempotent no-op, matching upstream updateSuggestionStatus.
+      // Idempotent no-op, matching upstream updateSuggestionStatus — but
+      // still dissolve any leftover anchor span (repairs documents damaged
+      // before finalization stripped anchors: re-finalizing heals them).
+      this.recordFinalizedMark(markId, status);
+      await this.stripFinalizedMarkAnchor(markId);
       const fresh = this.row()!;
       return {
         status: 200,
@@ -1471,24 +1544,35 @@ export class DocumentDO extends YServer {
     }
     const isTextSuggestion =
       existing.kind === 'insert' || existing.kind === 'delete' || existing.kind === 'replace';
-    if (status === 'accepted' && isTextSuggestion) {
+    if (isTextSuggestion) {
       const doc = this.row()!;
       const markdown = String(doc.markdown);
-      const resolved = this.resolveStoredMarkAnchor(existing, markdown);
-      if (!resolved.ok) return { status: resolved.status, body: resolved.body };
-      const nextMarkdown = buildAcceptedSuggestionMarkdownFromSelection(
-        markdown,
-        existing as never,
-        resolved.selection,
-      );
-      const applied = await this.applyMarkdownToLiveDoc(nextMarkdown);
-      if (!applied) {
-        return {
-          status: 400,
-          body: { success: false, error: 'Accepted suggestion failed to parse' },
-        };
+      let nextMarkdown = markdown;
+      if (status === 'accepted') {
+        const resolved = this.resolveStoredMarkAnchor(existing, markdown);
+        if (!resolved.ok) return { status: resolved.status, body: resolved.body };
+        nextMarkdown = buildAcceptedSuggestionMarkdownFromSelection(
+          markdown,
+          existing as never,
+          resolved.selection,
+        );
+      }
+      // Finalizing must remove the suggestion's anchor span from the
+      // canonical text (accept AND reject). A leftover anchor re-derives
+      // client-side as a fresh "pending" suggestion — the resurrection
+      // loop's root cause (#54 could only dampen it at the write sites).
+      nextMarkdown = stripSuggestionSpansById(nextMarkdown, markId);
+      if (nextMarkdown !== markdown) {
+        const applied = await this.applyMarkdownToLiveDoc(nextMarkdown);
+        if (!applied) {
+          return {
+            status: 400,
+            body: { success: false, error: 'Finalized suggestion failed to parse' },
+          };
+        }
       }
     }
+    this.recordFinalizedMark(markId, status);
     this.setMark(markId, { ...existing, status });
     const eventId = this.addEvent(
       status === 'accepted' ? 'suggestion.accepted' : 'suggestion.rejected',

@@ -525,6 +525,68 @@ export function buildAcceptedSuggestionMarkdownFromSelection(
 }
 
 
+/**
+ * Dissolve a suggestion's anchor span(s) from projected markdown, keeping the
+ * inner content. Finalizing a suggestion (accept or reject) must remove its
+ * anchor from the canonical text: a leftover `<span data-proof="suggestion">`
+ * re-derives client-side as a fresh "pending" suggestion (status is never
+ * serialized into the span attrs) and resurrects the mark — the root cause of
+ * the reappearance loop the finalized-regression guard could only dampen.
+ * Handles nested spans (e.g. authored spans inside the anchor) and multiple
+ * spans carrying the same id (marks split across text nodes).
+ */
+export function stripSuggestionSpansById(markdown: string, markId: string): string {
+  if (!markId) return markdown;
+  let result = markdown;
+  let searchFrom = 0;
+  const tagPattern = /<span\b[^>]*>|<\/span>/g;
+
+  for (;;) {
+    tagPattern.lastIndex = searchFrom;
+    let open: { start: number; end: number } | null = null;
+    let match: RegExpExecArray | null;
+    while ((match = tagPattern.exec(result)) !== null) {
+      const tag = match[0];
+      if (
+        tag[1] !== '/' &&
+        tag.includes('data-proof="suggestion"') &&
+        tag.includes(`data-id="${markId}"`)
+      ) {
+        open = { start: match.index, end: match.index + tag.length };
+        break;
+      }
+    }
+    if (!open) return result;
+
+    // Find the matching close tag, counting nested spans.
+    tagPattern.lastIndex = open.end;
+    let depth = 1;
+    let close: { start: number; end: number } | null = null;
+    while ((match = tagPattern.exec(result)) !== null) {
+      if (match[0][1] === '/') {
+        depth -= 1;
+        if (depth === 0) {
+          close = { start: match.index, end: match.index + match[0].length };
+          break;
+        }
+      } else {
+        depth += 1;
+      }
+    }
+    if (!close) {
+      // Unbalanced markup: skip past this open tag rather than corrupting text.
+      searchFrom = open.end;
+      continue;
+    }
+
+    result =
+      result.slice(0, open.start) +
+      result.slice(open.end, close.start) +
+      result.slice(close.end);
+    searchFrom = open.start;
+  }
+}
+
 export function buildStoredSelectionMetadata(
   markdown: string,
   selection: { sourceStart: number; sourceEnd: number },
