@@ -9,3 +9,21 @@ export function shouldPreserveMissingLocalMark(value: unknown): boolean {
   if (status === 'accepted' || status === 'rejected') return false;
   return true;
 }
+
+function readStatus(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return (value as { status?: unknown }).status;
+}
+
+/**
+ * True when writing `incoming` over `current` would regress a mark out of a
+ * terminal state — e.g. a stale client's cached "pending" snapshot clobbering
+ * a suggestion the server (or another client) already accepted/rejected.
+ * Once a mark is accepted/rejected that decision is final; only another write
+ * carrying the same terminal status (an idempotent echo) may proceed.
+ */
+export function isFinalizedMarkRegression(current: unknown, incoming: unknown): boolean {
+  const currentStatus = readStatus(current);
+  if (currentStatus !== 'accepted' && currentStatus !== 'rejected') return false;
+  return readStatus(incoming) !== currentStatus;
+}

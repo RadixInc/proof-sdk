@@ -45,6 +45,9 @@ jobs:
       # Share client mark mutations: accept/reject/resolve/unresolve route
       # through the /ops envelope, not a nonexistent /marks/* REST path.
       - run: npm run test:share-client-marks
+      # A stale client's cached "pending" snapshot must never overwrite a
+      # suggestion the server already finalized (accepted/rejected).
+      - run: npm run test:marks-regression-guard
 
   leak-scan:
     runs-on: ubuntu-latest

@@ -28,7 +28,8 @@
     "test:proof-sdk": "tsx src/tests/proof-sdk-agent-bridge-client.test.ts",
     "demo:agent": "npm --workspace proof-example run demo:agent",
     "test:bug-reports": "tsx src/tests/worker-bug-reports.test.ts",
-    "test:share-client-marks": "tsx src/tests/share-client-mark-preconditions.test.ts"
+    "test:share-client-marks": "tsx src/tests/share-client-mark-preconditions.test.ts",
+    "test:marks-regression-guard": "tsx src/tests/marks-preservation-finalized-regression.test.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.2.8",
