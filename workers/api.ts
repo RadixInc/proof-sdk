@@ -1053,6 +1053,76 @@ async function forwardToDocumentDo(
 }
 
 // ---------------------------------------------------------------------------
+// Client metrics ingest
+// ---------------------------------------------------------------------------
+
+/**
+ * Receives the web editor's fire-and-forget telemetry beacons
+ * (navigator.sendBeacon from src/editor/plugins/marks.ts and
+ * src/bridge/share-client.ts). These signals only exist client-side —
+ * whether stored mark anchors re-resolved against the live doc, and how
+ * long a collab reconnect took — so without this route they were dropped
+ * at the front door (the POST fell through to the asset handler and
+ * 405ed). The payload is reduced to an allowlisted, bounded shape and
+ * emitted as one structured log line, making the fields queryable in
+ * Workers Observability; nothing is stored and nothing leaves the
+ * deployment (VISION security model).
+ */
+const METRIC_MAX_BODY_BYTES = 2048;
+const METRIC_SOURCE_MAX_CHARS = 64;
+
+const METRIC_PARSERS: Record<
+  string,
+  (payload: Record<string, unknown>) => Record<string, string | number> | null
+> = {
+  'mark-anchor': (payload) =>
+    payload.result === 'success' || payload.result === 'failure'
+      ? { result: payload.result }
+      : null,
+  'collab-reconnect': (payload) =>
+    typeof payload.durationMs === 'number' &&
+    Number.isFinite(payload.durationMs) &&
+    payload.durationMs >= 0
+      ? { durationMs: Math.round(payload.durationMs) }
+      : null,
+};
+
+async function handleMetricIngest(
+  request: Request,
+  metric: string,
+  identity: Identity,
+): Promise<Response> {
+  const parseFields = METRIC_PARSERS[metric];
+  if (!parseFields) {
+    return json({ success: false, error: `Unknown metric: ${metric}` }, 404);
+  }
+  const raw = await request.text();
+  if (raw.length > METRIC_MAX_BODY_BYTES) {
+    return json({ success: false, error: 'Metric payload too large' }, 413);
+  }
+  let payload: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('not an object');
+    }
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return json({ success: false, error: 'Metric body must be a JSON object' }, 400);
+  }
+  const fields = parseFields(payload);
+  if (!fields) {
+    return json({ success: false, error: `Invalid ${metric} payload` }, 400);
+  }
+  const source =
+    typeof payload.source === 'string' && payload.source.length > 0
+      ? payload.source.slice(0, METRIC_SOURCE_MAX_CHARS)
+      : 'unknown';
+  console.log({ event: 'client-metric', metric, source, actor: identity.kind, ...fields });
+  return new Response(null, { status: 204 });
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -1099,6 +1169,12 @@ export async function handleApiRequest(
         'cache-control': 'no-store',
       },
     });
+  }
+
+  // Telemetry beacons from the web editor (mark-anchor, collab-reconnect).
+  const metricsMatch = path.match(/^\/api\/metrics\/([a-z0-9-]+)$/);
+  if (method === 'POST' && metricsMatch) {
+    return handleMetricIngest(request, metricsMatch[1], _identity);
   }
 
   if (method === 'POST' && (path === '/documents' || path === '/api/documents')) {

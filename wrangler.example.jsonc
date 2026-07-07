@@ -40,7 +40,15 @@
   },
 
   "observability": {
-    "enabled": true
+    "enabled": true,
+    // Automatic tracing (spans for the Worker invocation and its D1/R2/DO
+    // subrequests, unified across DocumentDO calls). Not implied by
+    // "enabled" while tracing is in beta — it must be switched on here.
+    // Low-traffic deployments can keep full sampling; set
+    // "head_sampling_rate" (0..1) if volume ever warrants it.
+    "traces": {
+      "enabled": true
+    }
   },
 
   "vars": {

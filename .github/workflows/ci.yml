@@ -48,6 +48,9 @@ jobs:
       # A stale client's cached "pending" snapshot must never overwrite a
       # suggestion the server already finalized (accepted/rejected).
       - run: npm run test:marks-regression-guard
+      # Client metrics ingest: telemetry beacons land as structured logs
+      # instead of 405ing against the asset handler.
+      - run: npm run test:worker-metrics
 
   leak-scan:
     runs-on: ubuntu-latest
