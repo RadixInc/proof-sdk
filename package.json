@@ -31,7 +31,8 @@
     "test:share-client-marks": "tsx src/tests/share-client-mark-preconditions.test.ts",
     "test:marks-regression-guard": "tsx src/tests/marks-preservation-finalized-regression.test.ts",
     "test:worker-metrics": "tsx src/tests/worker-metrics.test.ts",
-    "test:share-client-auth": "tsx src/tests/share-client-auth-interception.test.ts"
+    "test:share-client-auth": "tsx src/tests/share-client-auth-interception.test.ts",
+    "test:suggestion-finalize": "tsx src/tests/visible-text-strip.test.ts && tsx src/tests/worker-suggestion-finalize.test.ts"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.2.8",

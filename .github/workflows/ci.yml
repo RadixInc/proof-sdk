@@ -54,6 +54,9 @@ jobs:
       # Expired-SSO detection: an Access login page answering an API fetch
       # must surface as "session expired", never as a silent no-op.
       - run: npm run test:share-client-auth
+      # Finalized suggestions dissolve their anchor spans and cannot be
+      # resurrected by a stale client's delete-and-re-add.
+      - run: npm run test:suggestion-finalize
 
   leak-scan:
     runs-on: ubuntu-latest
