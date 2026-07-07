@@ -51,6 +51,9 @@ jobs:
       # Client metrics ingest: telemetry beacons land as structured logs
       # instead of 405ing against the asset handler.
       - run: npm run test:worker-metrics
+      # Expired-SSO detection: an Access login page answering an API fetch
+      # must surface as "session expired", never as a silent no-op.
+      - run: npm run test:share-client-auth
 
   leak-scan:
     runs-on: ubuntu-latest
