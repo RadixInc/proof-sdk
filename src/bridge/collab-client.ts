@@ -2,7 +2,7 @@ import * as Y from 'yjs';
 import YProvider from 'y-partyserver/provider';
 import type { Awareness } from 'y-protocols/awareness';
 import { shareClient, type CollabSessionInfo, type ShareRole } from './share-client';
-import { shouldPreserveMissingLocalMark } from './marks-preservation';
+import { isFinalizedMarkRegression, shouldPreserveMissingLocalMark } from './marks-preservation';
 import { recordClientIncidentEvent } from '../agent/client-incident-buffer';
 
 type PresenceHandler = (count: number) => void;
@@ -802,9 +802,12 @@ export class CollabClient {
           if (!nextMarkKeys.has(key)) this.marksMap?.delete(key);
         });
         for (const [key, value] of Object.entries(mergedMarks)) {
-          if (!deepEqual(currentMarksSnapshot[key], value)) {
-            this.marksMap?.set(key, value);
+          if (deepEqual(currentMarksSnapshot[key], value)) continue;
+          if (isFinalizedMarkRegression(currentMarksSnapshot[key], value)) {
+            this.debugLog('skip-stale-finalized-mark-overwrite', { markId: key });
+            continue;
           }
+          this.marksMap?.set(key, value);
         }
       }, 'local-marks-sync');
     } finally {

@@ -40,6 +40,7 @@ import {
 } from './headless-engine.js';
 import { resolveCollabSigningSecret, verifyCollabToken } from './collab-token';
 import { hashSecret, resolveDefaultHumanRole } from './util';
+import { isFinalizedMarkRegression } from '../src/bridge/marks-preservation';
 import type { ResolvedRole } from './util';
 import { canonicalizeStoredMarks } from '../src/formats/marks';
 import type { CommentReply, StoredMark } from '../src/formats/marks';
@@ -1069,7 +1070,12 @@ export class DocumentDO extends YServer {
       for (const key of [...map.keys()]) {
         if (!(key in next)) map.delete(key);
       }
-      for (const [key, value] of Object.entries(next)) map.set(key, value);
+      for (const [key, value] of Object.entries(next)) {
+        // A stale client's cached "pending" snapshot must never regress a
+        // suggestion the server already finalized (accepted/rejected).
+        if (isFinalizedMarkRegression(map.get(key), value)) continue;
+        map.set(key, value);
+      }
     }, 'agent-op');
   }
 
