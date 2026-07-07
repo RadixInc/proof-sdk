@@ -1172,13 +1172,28 @@ export class DocumentDO extends YServer {
         },
       };
     }
-    const resolved = resolveOpAnchor(
-      markdown,
-      target,
-      'Suggestion anchor could not be resolved in current markdown',
-    );
-    if (!resolved.ok) return resolved;
-    return { ok: true, selection: resolved.anchor.selection };
+    const message = 'Suggestion anchor could not be resolved in current markdown';
+    // Graduated fallback: the stabilized context captured at add time is a
+    // disambiguator, not a veto. Any accepted edit near the anchor (e.g.
+    // finalizing a neighboring suggestion) invalidates the stored
+    // contextBefore/contextAfter while the anchor text itself is still
+    // unique and present — so retry without context, then via the plain
+    // quote, before giving up.
+    const attempts: Array<typeof target> = [target];
+    if (typeof target.contextBefore === 'string' || typeof target.contextAfter === 'string') {
+      const { contextBefore: _cb, contextAfter: _ca, ...bare } = target;
+      attempts.push(bare);
+    }
+    if (typeof mark.quote === 'string' && mark.quote && mark.quote !== target.anchor) {
+      attempts.push(buildImplicitLegacyTarget(mark.quote));
+    }
+    let failure: { ok: false; status: number; body: Record<string, unknown> } | null = null;
+    for (const attempt of attempts) {
+      const resolved = resolveOpAnchor(markdown, attempt, message);
+      if (resolved.ok) return { ok: true, selection: resolved.anchor.selection };
+      failure = failure ?? resolved;
+    }
+    return failure!;
   }
 
   /** Standard mutation success body (mirrors upstream persistMarks results). */
