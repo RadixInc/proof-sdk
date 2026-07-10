@@ -1,3 +1,12 @@
+import blueIconUrl from './assets/agent-icons/blue.png';
+import limeIconUrl from './assets/agent-icons/lime.png';
+import mintIconUrl from './assets/agent-icons/mint.png';
+import orangeIconUrl from './assets/agent-icons/orange.png';
+import pinkIconUrl from './assets/agent-icons/pink.png';
+import purpleIconUrl from './assets/agent-icons/purple.png';
+import redIconUrl from './assets/agent-icons/red.png';
+import yellowIconUrl from './assets/agent-icons/yellow.png';
+
 export const AGENT_FACE_VARIANTS = [
   'blue',
   'lime',
@@ -51,14 +60,14 @@ const FACE_PALETTES: Record<AgentFaceVariant, AgentFacePalette> = {
 };
 
 const FACE_ASSET_URLS: Record<AgentFaceVariant, string> = {
-  blue: new URL('./assets/agent-icons/blue.png', import.meta.url).href,
-  lime: new URL('./assets/agent-icons/lime.png', import.meta.url).href,
-  mint: new URL('./assets/agent-icons/mint.png', import.meta.url).href,
-  orange: new URL('./assets/agent-icons/orange.png', import.meta.url).href,
-  pink: new URL('./assets/agent-icons/pink.png', import.meta.url).href,
-  purple: new URL('./assets/agent-icons/purple.png', import.meta.url).href,
-  red: new URL('./assets/agent-icons/red.png', import.meta.url).href,
-  yellow: new URL('./assets/agent-icons/yellow.png', import.meta.url).href,
+  blue: blueIconUrl,
+  lime: limeIconUrl,
+  mint: mintIconUrl,
+  orange: orangeIconUrl,
+  pink: pinkIconUrl,
+  purple: purpleIconUrl,
+  red: redIconUrl,
+  yellow: yellowIconUrl,
 };
 
 const runtimeAgentFaceAssignments = new Map<string, AgentFaceVariant>();
