@@ -5,6 +5,11 @@ export default defineConfig({
   root: 'src',
   publicDir: resolve(__dirname, 'public'),
   base: '/',
+  define: {
+    // import.meta.env isn't usable in the iife build (see telemetry.ts) —
+    // inject the version as a plain build-time constant instead.
+    __PROOF_APP_VERSION__: JSON.stringify(process.env.VITE_APP_VERSION ?? 'dev'),
+  },
   build: {
     outDir: '../dist',
     emptyOutDir: true,
