@@ -252,7 +252,7 @@ function createPresenceElement(): HTMLElement {
     style.textContent = `
       .agent-presence {
         padding: 12px 0;
-        border-top: 1px solid var(--proof-border, #e5e7eb);
+        border-top: 1px solid var(--border, #e5e5ec);
       }
 
       .agent-presence-header {
@@ -260,7 +260,7 @@ function createPresenceElement(): HTMLElement {
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        color: var(--proof-text-muted, #6b7280);
+        color: var(--text-muted, #797d90);
         padding: 0 16px 8px;
       }
 
@@ -273,30 +273,30 @@ function createPresenceElement(): HTMLElement {
 
       .agent-presence-empty {
         font-size: 13px;
-        color: var(--proof-text-muted, #9ca3af);
+        color: var(--text-faint, #a6a9b8);
         padding: 8px 8px;
         text-align: center;
         font-style: italic;
       }
 
       .agent-card {
-        background: var(--proof-bg-secondary, #f9fafb);
-        border: 1px solid var(--proof-border, #e5e7eb);
-        border-left: 3px solid var(--agent-family-accent, #7c87d6);
-        border-radius: 8px;
+        background: var(--surface-2, #f4f4f8);
+        border: 1px solid var(--border, #e5e5ec);
+        border-left: 3px solid var(--agent-family-accent, var(--ai, #7c3aed));
+        border-radius: var(--r-md, 8px);
         padding: 10px 12px;
         cursor: pointer;
         transition: all 0.15s ease;
       }
 
       .agent-card:hover {
-        background: var(--proof-bg-hover, #f3f4f6);
-        border-color: var(--proof-border-hover, #d1d5db);
+        background: var(--surface-3, #ececf2);
+        border-color: var(--border-strong, #d4d5df);
       }
 
       .agent-card.following {
-        border-color: var(--proof-primary, #2563eb);
-        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+        border-color: var(--link, #2563eb);
+        box-shadow: 0 0 0 3px var(--focus, rgba(37, 99, 235, 0.32));
       }
 
       .agent-card-header {
@@ -327,21 +327,21 @@ function createPresenceElement(): HTMLElement {
       .agent-card.reading .agent-status-icon,
       .agent-card.thinking .agent-status-icon,
       .agent-card.acting .agent-status-icon {
-        color: var(--proof-primary, #2563eb);
+        color: var(--link, #2563eb);
         animation: pulse 1.5s ease-in-out infinite;
       }
 
       .agent-card.completed .agent-status-icon {
-        color: var(--proof-success, #10b981);
+        color: var(--ok, #16a34a);
       }
 
       .agent-card.error .agent-status-icon,
       .agent-card.interrupted .agent-status-icon {
-        color: var(--proof-warning, #f59e0b);
+        color: var(--warn, #d97706);
       }
 
       .agent-card.cancelled .agent-status-icon {
-        color: var(--proof-text-muted, #9ca3af);
+        color: var(--text-faint, #a6a9b8);
       }
 
       @keyframes pulse {
@@ -352,7 +352,7 @@ function createPresenceElement(): HTMLElement {
       .agent-skill-name {
         font-size: 13px;
         font-weight: 500;
-        color: var(--proof-text, #1f2937);
+        color: var(--text, #191a23);
         flex: 1;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -361,15 +361,15 @@ function createPresenceElement(): HTMLElement {
 
       .agent-following-badge {
         font-size: 10px;
-        background: var(--proof-primary, #2563eb);
-        color: white;
+        background: var(--btn-bg, #191a23);
+        color: var(--btn-fg, #ffffff);
         padding: 2px 6px;
-        border-radius: 3px;
+        border-radius: var(--r-xs, 4px);
       }
 
       .agent-card-thinking {
         font-size: 12px;
-        color: var(--proof-text-muted, #6b7280);
+        color: var(--text-muted, #797d90);
         margin-bottom: 6px;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -381,18 +381,18 @@ function createPresenceElement(): HTMLElement {
         align-items: center;
         gap: 8px;
         font-size: 11px;
-        color: var(--proof-text-muted, #9ca3af);
+        color: var(--text-faint, #a6a9b8);
       }
 
       .agent-position {
-        background: var(--proof-bg-tertiary, #e5e7eb);
+        background: var(--surface-3, #ececf2);
         padding: 2px 6px;
-        border-radius: 3px;
+        border-radius: var(--r-xs, 4px);
         cursor: pointer;
       }
 
       .agent-position:hover {
-        background: var(--proof-bg-hover, #d1d5db);
+        background: var(--border-strong, #d4d5df);
       }
 
       .agent-card-actions {
@@ -405,47 +405,29 @@ function createPresenceElement(): HTMLElement {
         flex: 1;
         padding: 4px 8px;
         font-size: 11px;
-        border: 1px solid var(--proof-border, #e5e7eb);
-        border-radius: 4px;
-        background: var(--proof-bg, #ffffff);
-        color: var(--proof-text-muted, #6b7280);
+        border: 1px solid var(--border, #e5e5ec);
+        border-radius: var(--r-sm, 6px);
+        background: var(--surface, #ffffff);
+        color: var(--text-muted, #797d90);
         cursor: pointer;
         transition: all 0.1s ease;
       }
 
       .agent-action-btn:hover {
-        background: var(--proof-bg-hover, #f3f4f6);
-        color: var(--proof-text, #1f2937);
+        background: var(--surface-3, #ececf2);
+        color: var(--text, #191a23);
       }
 
       .agent-action-btn.cancel-btn:hover {
-        background: var(--proof-error-bg, #fef2f2);
-        border-color: var(--proof-error, #ef4444);
-        color: var(--proof-error, #ef4444);
+        background: color-mix(in srgb, var(--err, #dc2626) 10%, transparent);
+        border-color: var(--err, #dc2626);
+        color: var(--err, #dc2626);
       }
 
       .agent-action-btn.resume-btn:hover {
-        background: var(--proof-success-bg, #f0fdf4);
-        border-color: var(--proof-success, #10b981);
-        color: var(--proof-success, #10b981);
-      }
-
-      /* Dark mode support */
-      @media (prefers-color-scheme: dark) {
-        .agent-presence {
-          --proof-bg: #1f2937;
-          --proof-bg-secondary: #374151;
-          --proof-bg-tertiary: #4b5563;
-          --proof-bg-hover: #4b5563;
-          --proof-border: #4b5563;
-          --proof-border-hover: #6b7280;
-          --proof-text: #f9fafb;
-          --proof-text-muted: #9ca3af;
-          --proof-primary: #3b82f6;
-          --proof-success: #34d399;
-          --proof-warning: #fbbf24;
-          --proof-error: #f87171;
-        }
+        background: color-mix(in srgb, var(--ok, #16a34a) 12%, transparent);
+        border-color: var(--ok, #16a34a);
+        color: var(--ok, #16a34a);
       }
     `;
     document.head.appendChild(style);

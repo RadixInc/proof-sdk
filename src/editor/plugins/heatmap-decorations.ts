@@ -49,7 +49,7 @@ type ResolvedMarkRange = {
   to: number;
 };
 
-const DEFAULT_GUTTER_COLOR = '#E5E7EB';
+const DEFAULT_GUTTER_COLOR = 'var(--border, #e5e5ec)';
 
 /**
  * Gutter status - determines final color
@@ -148,6 +148,12 @@ function getAuthoredBlockColor(
 
   if (system > 0) return getMarkColor('system');
   if (human === 0 && ai === 0) return null;
+
+  // Genuinely shared authorship reads as "mixed" — a teal→violet gradient bar —
+  // rather than collapsing to whichever author holds the majority.
+  const minorityShare = Math.min(human, ai) / (human + ai);
+  if (minorityShare >= 0.25) return getMarkColor('mixed');
+
   return ai >= human ? getMarkColor('ai') : getMarkColor('human');
 }
 
@@ -391,7 +397,7 @@ function buildViewportGutterDOM(gutterEl: HTMLElement, segments: ViewportSegment
     div.style.left = '0px';
     div.style.right = '0px';
     div.style.height = `${Math.min(viewportHeight, firstSeg.top)}px`;
-    div.style.backgroundColor = firstSeg.color;
+    div.style.background = firstSeg.color;
     gutterEl.appendChild(div);
   }
 
@@ -410,7 +416,7 @@ function buildViewportGutterDOM(gutterEl: HTMLElement, segments: ViewportSegment
     div.style.left = '0px';
     div.style.right = '0px';
     div.style.height = `${Math.max(1, Math.min(viewportHeight, segBottom) - segTop)}px`;
-    div.style.backgroundColor = seg.color;
+    div.style.background = seg.color;
     gutterEl.appendChild(div);
   }
 
@@ -424,7 +430,7 @@ function buildViewportGutterDOM(gutterEl: HTMLElement, segments: ViewportSegment
     div.style.left = '0px';
     div.style.right = '0px';
     div.style.height = `${Math.max(1, viewportHeight - Math.max(0, lastBottom))}px`;
-    div.style.backgroundColor = lastSeg.color;
+    div.style.background = lastSeg.color;
     gutterEl.appendChild(div);
   }
 }
@@ -451,7 +457,7 @@ function buildGutterDOM(gutterEl: HTMLElement, segments: CachedSegment[]): void 
     div.style.left = '0px';
     div.style.right = '0px';
     div.style.height = `${firstSeg.docTop}px`;
-    div.style.backgroundColor = firstSeg.color;
+    div.style.background = firstSeg.color;
     gutterEl.appendChild(div);
   }
 
@@ -471,7 +477,7 @@ function buildGutterDOM(gutterEl: HTMLElement, segments: CachedSegment[]): void 
     div.style.left = '0px';
     div.style.right = '0px';
     div.style.height = `${Math.max(1, segBottom - seg.docTop)}px`;
-    div.style.backgroundColor = seg.color;
+    div.style.background = seg.color;
     gutterEl.appendChild(div);
   }
 }

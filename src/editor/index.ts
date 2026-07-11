@@ -2768,33 +2768,33 @@ class ProofEditorImpl implements ProofEditor {
     // gone and every mutation from this tab is a silent no-op until the
     // user reloads through SSO. Outranks every other status.
     if (this.shareAuthIntercepted) {
-      return { label: 'Session expired - reload to sign in', color: '#ef4444' };
+      return { label: 'Session expired - reload to sign in', color: 'var(--err, #dc2626)' };
     }
     if (!this.collabEnabled) {
-      return { label: 'Live sync unavailable', color: '#ef4444' };
+      return { label: 'Live sync unavailable', color: 'var(--err, #dc2626)' };
     }
     if (this.collabConnectionStatus === 'connected') {
       if (!this.collabIsSynced) {
-        return { label: 'Syncing...', color: '#f59e0b' };
+        return { label: 'Syncing...', color: 'var(--warn, #d97706)' };
       }
       if (this.collabUnsyncedChanges > 0) {
-        return { label: 'Saving...', color: '#f59e0b' };
+        return { label: 'Saving...', color: 'var(--warn, #d97706)' };
       }
-      return { label: 'Saved', color: '#34d399' };
+      return { label: 'Saved', color: 'var(--ok, #16a34a)' };
     }
     if (this.collabConnectionStatus === 'connecting') {
-      return { label: 'Connecting...', color: '#f59e0b' };
+      return { label: 'Connecting...', color: 'var(--warn, #d97706)' };
     }
     if (collabClient.terminalCloseReason === 'unshared') {
-      return { label: 'Document is no longer shared', color: '#ef4444' };
+      return { label: 'Document is no longer shared', color: 'var(--err, #dc2626)' };
     }
     if (collabClient.terminalCloseReason === 'permission-denied') {
-      return { label: 'Access revoked', color: '#ef4444' };
+      return { label: 'Access revoked', color: 'var(--err, #dc2626)' };
     }
     if (this.collabUnsyncedChanges > 0) {
-      return { label: 'Offline - unsaved changes', color: '#ef4444' };
+      return { label: 'Offline - unsaved changes', color: 'var(--err, #dc2626)' };
     }
-    return { label: 'Offline - reconnecting', color: '#ef4444' };
+    return { label: 'Offline - reconnecting', color: 'var(--err, #dc2626)' };
   }
 
   private ensureShareStatusPulseStyle(): void {
@@ -3042,8 +3042,8 @@ class ProofEditorImpl implements ProofEditor {
     style.id = 'proof-share-banner-responsive-css';
     style.textContent = `
       @keyframes proof-agent-pulse {
-        0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.40), 0 0 0 0.5px rgba(0,0,0,0.08); }
-        50% { box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.00), 0 0 0 0.5px rgba(0,0,0,0.08); }
+        0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai, #7c3aed) 40%, transparent), 0 0 0 0.5px rgba(0,0,0,0.08); }
+        50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ai, #7c3aed) 0%, transparent), 0 0 0 0.5px rgba(0,0,0,0.08); }
       }
       #share-banner .share-pill-title {
         min-width: 0;
@@ -3069,7 +3069,7 @@ class ProofEditorImpl implements ProofEditor {
         flex-shrink:0;
       }
       #share-banner .share-pill-status-inline .status-label {
-        color:#6b7280;
+        color:var(--text-muted, #797d90);
         font-size:11px;
         font-weight:500;
         line-height:1;
@@ -3077,7 +3077,7 @@ class ProofEditorImpl implements ProofEditor {
       #share-banner .share-pill-status-sep {
         width:1px;
         height:14px;
-        background:rgba(0,0,0,0.10);
+        background:var(--border, #e5e5ec);
         flex-shrink:0;
       }
       #share-banner .proof-avatar-tooltip {
@@ -3085,12 +3085,12 @@ class ProofEditorImpl implements ProofEditor {
         top:calc(100% + 6px);
         left:50%;
         transform:translateX(-50%);
-        background:#1a1a1a;
-        color:#fff;
+        background:var(--text, #191a23);
+        color:var(--surface, #ffffff);
         font-size:11px;
         font-weight:500;
         padding:4px 8px;
-        border-radius:6px;
+        border-radius:var(--r-sm, 6px);
         white-space:nowrap;
         pointer-events:none;
         opacity:0;
@@ -3105,7 +3105,7 @@ class ProofEditorImpl implements ProofEditor {
         left:50%;
         transform:translateX(-50%);
         border:4px solid transparent;
-        border-bottom-color:#1a1a1a;
+        border-bottom-color:var(--text, #191a23);
       }
       #share-banner .proof-avatar-wrap:hover .proof-avatar-tooltip {
         opacity:1;
@@ -3191,7 +3191,7 @@ class ProofEditorImpl implements ProofEditor {
         background:${avatar.color};color:#fff;
         font-size:11px;font-weight:600;
         display:inline-flex;align-items:center;justify-content:center;
-        border:2px solid #fff;
+        border:2px solid var(--surface, #ffffff);
         box-shadow:0 0 0 0.5px rgba(0,0,0,0.08);
       `;
       const tooltip = document.createElement('span');
@@ -3212,10 +3212,10 @@ class ProofEditorImpl implements ProofEditor {
       overflow.textContent = `+${avatars.length - 5}`;
       overflow.style.cssText = `
         width:24px;height:24px;border-radius:50%;
-        background:#e5e7eb;color:#4b5563;
+        background:var(--surface-2, #f4f4f8);color:var(--text-2, #4b4e60);
         font-size:10px;font-weight:600;
         display:inline-flex;align-items:center;justify-content:center;
-        border:2px solid #fff;margin-left:-6px;
+        border:2px solid var(--surface, #ffffff);margin-left:-6px;
       `;
       container.appendChild(overflow);
     }
@@ -3232,27 +3232,27 @@ class ProofEditorImpl implements ProofEditor {
       menu.setAttribute('role', 'menu');
       menu.style.cssText = `
         position:absolute;top:calc(100% + 8px);right:0;min-width:190px;
-        background:rgba(17,24,39,0.96);border:1px solid rgba(255,255,255,0.12);
-        border-radius:12px;padding:8px;z-index:1002;
-        box-shadow:0 16px 40px rgba(0,0,0,0.35);
+        background:var(--surface, #ffffff);border:1px solid var(--border, #e5e5ec);
+        border-radius:var(--r-lg, 12px);padding:8px;z-index:1002;
+        box-shadow:var(--sh-lg, 0 14px 38px rgba(20,20,45,.14), 0 2px 8px rgba(20,20,45,.06));
         backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
       `;
 
       const header = document.createElement('div');
       header.textContent = 'Collaborators';
-      header.style.cssText = 'padding:4px 8px 8px 8px;color:rgba(255,255,255,0.70);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;';
+      header.style.cssText = 'padding:4px 8px 8px 8px;color:var(--text-muted, #797d90);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;';
       menu.appendChild(header);
 
       for (const avatar of avatars.slice(0, 10)) {
         const row = document.createElement('div');
         row.setAttribute('role', 'menuitem');
-        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;';
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;border-radius:var(--r-md, 8px);';
         const dot = document.createElement('span');
         dot.style.cssText = `width:18px;height:18px;border-radius:50%;background:${avatar.color};color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;`;
         dot.textContent = avatar.initial;
         const name = document.createElement('span');
         name.textContent = avatar.name;
-        name.style.cssText = 'color:rgba(255,255,255,0.92);font-size:12px;font-weight:500;';
+        name.style.cssText = 'color:var(--text, #191a23);font-size:12px;font-weight:500;';
         row.append(dot, name);
         menu.appendChild(row);
       }
@@ -3310,8 +3310,8 @@ class ProofEditorImpl implements ProofEditor {
       this.shareBannerTitleEditing = true;
       titleEl.contentEditable = 'true';
       titleEl.style.outline = 'none';
-      titleEl.style.borderBottom = '1px solid rgba(0,0,0,0.15)';
-      titleEl.style.color = '#111827';
+      titleEl.style.borderBottom = '1px solid var(--border-strong, #d4d5df)';
+      titleEl.style.color = 'var(--text, #191a23)';
       const range = document.createRange();
       range.selectNodeContents(titleEl);
       const selection = window.getSelection();
@@ -3336,7 +3336,7 @@ class ProofEditorImpl implements ProofEditor {
         this.shareBannerTitleEditing = false;
         titleEl.contentEditable = 'false';
         titleEl.style.borderBottom = '';
-        titleEl.style.color = '#374151';
+        titleEl.style.color = 'var(--text-2, #4b4e60)';
         titleEl.textContent = this.shareDocTitle || 'Untitled';
       }
     });
@@ -3351,7 +3351,7 @@ class ProofEditorImpl implements ProofEditor {
     this.shareBannerTitleEditing = false;
     titleEl.contentEditable = 'false';
     titleEl.style.borderBottom = '';
-    titleEl.style.color = '#374151';
+    titleEl.style.color = 'var(--text-2, #4b4e60)';
 
     const previousTitle = this.shareDocTitle || 'Untitled';
     const nextTitle = titleEl.textContent?.trim() || '';
@@ -3455,15 +3455,15 @@ class ProofEditorImpl implements ProofEditor {
     wordmark.href = 'https://www.proofeditor.ai';
     wordmark.target = '_blank';
     wordmark.rel = 'noopener';
-    wordmark.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:0 8px;border-radius:10px;font-weight:600;color:#333;font-size:13px;letter-spacing:-0.2px;flex-shrink:0;text-decoration:none;';
+    wordmark.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:0 8px;border-radius:10px;font-weight:600;color:var(--text, #191a23);font-size:13px;letter-spacing:-0.2px;flex-shrink:0;text-decoration:none;';
 
     const separator = document.createElement('span');
     separator.className = 'share-pill-sep';
-    separator.style.cssText = 'width:1px;height:16px;background:rgba(0,0,0,0.1);flex-shrink:0';
+    separator.style.cssText = 'width:1px;height:16px;background:var(--border, #e5e5ec);flex-shrink:0';
 
     const title = document.createElement('span');
     title.className = 'share-pill-title';
-    title.style.cssText = 'font-weight:500;color:#374151;font-size:13px;flex:1 1 auto;min-width:0;';
+    title.style.cssText = 'font-weight:500;color:var(--text-2, #4b4e60);font-size:13px;flex:1 1 auto;min-width:0;';
     this.shareBannerTitleEl = title;
     this.updateShareBannerTitleDisplay();
     this.setupTitleEditing(title);
@@ -3736,23 +3736,23 @@ class ProofEditorImpl implements ProofEditor {
     const panel = document.createElement('div');
     panel.style.cssText = `
       width:min(720px, 100%);
-      background:rgba(17,24,39,0.98);
-      border:1px solid rgba(255,255,255,0.12);
-      border-radius:16px;
-      box-shadow:0 24px 60px rgba(0,0,0,0.45);
-      color:rgba(255,255,255,0.92);
+      background:var(--surface, #ffffff);
+      border:1px solid var(--border, #e5e5ec);
+      border-radius:var(--r-xl, 16px);
+      box-shadow:var(--sh-xl, 0 28px 64px rgba(20,20,45,.22));
+      color:var(--text, #191a23);
       overflow:hidden;
     `;
 
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.10)';
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border, #e5e5ec)';
     const title = document.createElement('div');
     title.textContent = 'Activity';
     title.style.cssText = 'font-size:13px;font-weight:700;letter-spacing:0.02em';
     const close = document.createElement('button');
     close.type = 'button';
     close.textContent = 'Close';
-    close.style.cssText = 'border:0;background:rgba(255,255,255,0.10);color:white;padding:6px 10px;border-radius:999px;font-size:12px;cursor:pointer';
+    close.style.cssText = 'border:0;background:var(--surface-2, #f4f4f8);color:var(--text, #191a23);padding:6px 10px;border-radius:999px;font-size:12px;cursor:pointer';
     header.append(title, close);
 
     const body = document.createElement('div');
@@ -3762,12 +3762,12 @@ class ProofEditorImpl implements ProofEditor {
     if (items.length === 0) {
       const empty = document.createElement('div');
       empty.textContent = 'No activity yet.';
-      empty.style.cssText = 'padding:14px 0;color:rgba(255,255,255,0.70);font-size:12px;line-height:1.35';
+      empty.style.cssText = 'padding:14px 0;color:var(--text-muted, #797d90);font-size:12px;line-height:1.35';
       body.appendChild(empty);
     } else {
       for (const item of items) {
         const row = document.createElement('div');
-        row.style.cssText = 'padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.08);font-size:12px;line-height:1.35';
+        row.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--border, #e5e5ec);font-size:12px;line-height:1.35';
         const when = typeof item.at === 'string' ? item.at : '';
         const who = typeof item.name === 'string' ? item.name : (typeof item.id === 'string' ? item.id : 'agent');
         const status = typeof item.status === 'string' ? item.status : (typeof item.type === 'string' ? item.type : '');
@@ -3808,27 +3808,27 @@ class ProofEditorImpl implements ProofEditor {
     const panel = document.createElement('div');
     panel.style.cssText = `
       width:min(560px, 100%);
-      background:rgba(17,24,39,0.98);
-      border:1px solid rgba(255,255,255,0.12);
-      border-radius:16px;
-      box-shadow:0 24px 60px rgba(0,0,0,0.45);
-      color:rgba(255,255,255,0.92);
+      background:var(--surface, #ffffff);
+      border:1px solid var(--border, #e5e5ec);
+      border-radius:var(--r-xl, 16px);
+      box-shadow:var(--sh-xl, 0 28px 64px rgba(20,20,45,.22));
+      color:var(--text, #191a23);
       overflow:hidden;
     `;
 
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.10)';
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border, #e5e5ec)';
     const title = document.createElement('div');
     title.textContent = 'Use a coding agent in this doc';
     title.style.cssText = 'font-size:13px;font-weight:700;letter-spacing:0.02em';
     const close = document.createElement('button');
     close.type = 'button';
     close.textContent = 'Close';
-    close.style.cssText = 'border:0;background:rgba(255,255,255,0.10);color:white;padding:6px 10px;border-radius:999px;font-size:12px;cursor:pointer';
+    close.style.cssText = 'border:0;background:var(--surface-2, #f4f4f8);color:var(--text, #191a23);padding:6px 10px;border-radius:999px;font-size:12px;cursor:pointer';
     header.append(title, close);
 
     const body = document.createElement('div');
-    body.style.cssText = 'padding:14px 16px 16px 16px;color:rgba(255,255,255,0.86);font-size:12px;line-height:1.5;';
+    body.style.cssText = 'padding:14px 16px 16px 16px;color:var(--text-2, #4b4e60);font-size:12px;line-height:1.5;';
     body.innerHTML = `
       <p style="margin:0 0 10px 0;">Coding agents can suggest and edit with the same permissions as the link you share. Their edits are attributed to the agent, with you recorded as the operator.</p>
       <p style="margin:0 0 8px 0;"><strong>How to connect:</strong></p>
@@ -3837,7 +3837,7 @@ class ProofEditorImpl implements ProofEditor {
         <li>Paste it into a coding agent run by someone in your organization (it signs in through your SSO via cloudflared), or one provisioned with an Access service token.</li>
         <li>The agent's contributions appear in the doc as it works.</li>
       </ol>
-      <p style="margin:0;color:rgba(255,255,255,0.72);">This needs a coding agent — one that can run shell commands and make direct HTTP requests, like Claude Code. A chat assistant without those tools cannot connect, and neither can agents outside your organization's access layer.</p>
+      <p style="margin:0;color:var(--text-muted, #797d90);">This needs a coding agent — one that can run shell commands and make direct HTTP requests, like Claude Code. A chat assistant without those tools cannot connect, and neither can agents outside your organization's access layer.</p>
     `;
 
     panel.append(header, body);
@@ -4167,8 +4167,8 @@ class ProofEditorImpl implements ProofEditor {
     btn.type = 'button';
     btn.setAttribute('aria-label', 'Share options');
     btn.style.cssText = `
-      display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;min-width:44px;padding:0 16px;background:#111;
-      border:none;border-radius:22px;color:#fff;font-size:13px;font-weight:600;
+      display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;min-width:44px;padding:0 16px;background:var(--btn-bg, #191a23);
+      border:none;border-radius:22px;color:var(--btn-fg, #ffffff);font-size:13px;font-weight:600;
       cursor:pointer;transition:background 0.15s;flex-shrink:0;font-family:inherit;
     `;
 
@@ -4180,10 +4180,10 @@ class ProofEditorImpl implements ProofEditor {
     btn.append(label, caret);
 
     btn.onmouseenter = () => {
-      btn.style.background = '#333';
+      btn.style.background = 'var(--btn-bg-hover, #2e303e)';
     };
     btn.onmouseleave = () => {
-      btn.style.background = '#111';
+      btn.style.background = 'var(--btn-bg, #191a23)';
     };
 
     const openMenu = () => {
@@ -4198,9 +4198,9 @@ class ProofEditorImpl implements ProofEditor {
       menu.setAttribute('role', 'menu');
       menu.style.cssText = `
         position:absolute;top:calc(100% + 8px);right:0;min-width:240px;
-        background:rgba(17,24,39,0.96);border:1px solid rgba(255,255,255,0.12);
-        border-radius:12px;padding:6px;z-index:1002;
-        box-shadow:0 16px 40px rgba(0,0,0,0.35);
+        background:var(--surface, #ffffff);border:1px solid var(--border, #e5e5ec);
+        border-radius:var(--r-lg, 12px);padding:6px;z-index:1002;
+        box-shadow:var(--sh-lg, 0 14px 38px rgba(20,20,45,.14), 0 2px 8px rgba(20,20,45,.06));
         backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
       `;
 
@@ -4211,10 +4211,10 @@ class ProofEditorImpl implements ProofEditor {
         item.style.cssText = `
           width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
           padding:10px 12px;min-height:44px;border-radius:10px;border:0;background:transparent;
-          color:${opts?.subtle ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.92)'};
+          color:${opts?.subtle ? 'var(--text-2, #4b4e60)' : 'var(--text, #191a23)'};
           font-size:12px;font-weight:${opts?.subtle ? '500' : '600'};cursor:pointer;text-align:left;
         `;
-        item.onmouseenter = () => { if (!opts?.disabled) item.style.background = 'rgba(255,255,255,0.08)'; };
+        item.onmouseenter = () => { if (!opts?.disabled) item.style.background = 'var(--surface-2, #f4f4f8)'; };
         item.onmouseleave = () => { item.style.background = 'transparent'; };
         if (opts?.disabled) {
           item.disabled = true;
@@ -4250,10 +4250,10 @@ class ProofEditorImpl implements ProofEditor {
         item.style.cssText = `
           width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
           padding:10px 12px;min-height:44px;border-radius:10px;border:0;background:transparent;
-          color:${opts?.subtle ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.92)'};
+          color:${opts?.subtle ? 'var(--text-2, #4b4e60)' : 'var(--text, #191a23)'};
           font-size:12px;font-weight:${opts?.subtle ? '500' : '600'};cursor:pointer;text-align:left;
         `;
-        item.onmouseenter = () => { if (!opts?.disabled) item.style.background = 'rgba(255,255,255,0.08)'; };
+        item.onmouseenter = () => { if (!opts?.disabled) item.style.background = 'var(--surface-2, #f4f4f8)'; };
         item.onmouseleave = () => { item.style.background = 'transparent'; };
         if (opts?.disabled) {
           item.disabled = true;
@@ -4277,7 +4277,7 @@ class ProofEditorImpl implements ProofEditor {
 
       const addDivider = () => {
         const hr = document.createElement('div');
-        hr.style.cssText = 'height:1px;background:rgba(255,255,255,0.10);margin:6px 6px';
+        hr.style.cssText = 'height:1px;background:var(--border, #e5e5ec);margin:6px 6px';
         menu.appendChild(hr);
       };
 
@@ -4419,7 +4419,7 @@ class ProofEditorImpl implements ProofEditor {
         chip.style.cssText = `
           margin-left:${chipGap}px;
           min-width:24px;height:18px;padding:0 6px;border-radius:999px;
-          background:rgba(17,24,39,0.92);color:#fff;font-size:10px;font-weight:700;line-height:1;
+          background:var(--text, #191a23);color:var(--surface, #ffffff);font-size:10px;font-weight:700;line-height:1;
           display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
           box-shadow:0 1px 4px rgba(0,0,0,0.22);
           font-variant-numeric: tabular-nums;
@@ -4444,7 +4444,7 @@ class ProofEditorImpl implements ProofEditor {
       btn.setAttribute('aria-expanded', 'false');
       btn.style.cssText = `
         display:inline-flex;align-items:center;justify-content:center;gap:0;min-height:44px;min-width:44px;padding:0 4px;
-        background:transparent;border:0;border-radius:18px;color:#111827;cursor:pointer;
+        background:transparent;border:0;border-radius:18px;color:var(--text, #191a23);cursor:pointer;
         transition:background 0.15s;flex-shrink:0;font-family:inherit;
       `;
 
@@ -4471,7 +4471,7 @@ class ProofEditorImpl implements ProofEditor {
 
       btn.appendChild(wrap);
       btn.onmouseenter = () => {
-        btn.style.background = 'rgba(17,24,39,0.06)';
+        btn.style.background = 'color-mix(in srgb, var(--text, #191a23) 6%, transparent)';
       };
       btn.onmouseleave = () => {
         btn.style.background = 'transparent';
@@ -4480,13 +4480,13 @@ class ProofEditorImpl implements ProofEditor {
       btn.setAttribute('aria-label', 'Add coding agent');
       btn.style.cssText = `
         display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;min-width:44px;padding:0 12px;
-        background:rgba(255,255,255,0.7);border:1px solid rgba(17,24,39,0.10);border-radius:22px;color:#111827;
+        background:color-mix(in srgb, var(--surface, #ffffff) 70%, transparent);border:1px solid var(--border, #e5e5ec);border-radius:22px;color:var(--text, #191a23);
         font-size:12px;font-weight:500;cursor:pointer;transition:background 0.15s,border-color 0.15s;flex-shrink:0;font-family:inherit;
       `;
 
       const icon = document.createElement('span');
       icon.textContent = '+';
-      icon.style.cssText = 'font-size:12px;line-height:1;color:#6b7280;';
+      icon.style.cssText = 'font-size:12px;line-height:1;color:var(--text-muted, #797d90);';
       btn.appendChild(icon);
 
       const label = document.createElement('span');
@@ -4496,12 +4496,12 @@ class ProofEditorImpl implements ProofEditor {
       btn.appendChild(label);
 
       btn.onmouseenter = () => {
-        btn.style.background = '#fff';
-        btn.style.borderColor = 'rgba(17,24,39,0.20)';
+        btn.style.background = 'var(--surface, #ffffff)';
+        btn.style.borderColor = 'var(--border-strong, #d4d5df)';
       };
       btn.onmouseleave = () => {
-        btn.style.background = 'rgba(255,255,255,0.7)';
-        btn.style.borderColor = 'rgba(17,24,39,0.10)';
+        btn.style.background = 'color-mix(in srgb, var(--surface, #ffffff) 70%, transparent)';
+        btn.style.borderColor = 'var(--border, #e5e5ec)';
       };
     }
 
@@ -4519,15 +4519,15 @@ class ProofEditorImpl implements ProofEditor {
       menu.setAttribute('role', 'menu');
       menu.style.cssText = `
         position:absolute;top:calc(100% + 8px);right:0;min-width:280px;max-width:min(360px, calc(100vw - 24px));
-        background:rgba(17,24,39,0.96);border:1px solid rgba(255,255,255,0.12);
-        border-radius:12px;padding:8px;z-index:1002;
-        box-shadow:0 16px 40px rgba(0,0,0,0.35);
+        background:var(--surface, #ffffff);border:1px solid var(--border, #e5e5ec);
+        border-radius:var(--r-lg, 12px);padding:8px;z-index:1002;
+        box-shadow:var(--sh-lg, 0 14px 38px rgba(20,20,45,.14), 0 2px 8px rgba(20,20,45,.06));
         backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
       `;
 
       const addDivider = () => {
         const hr = document.createElement('div');
-        hr.style.cssText = 'height:1px;background:rgba(255,255,255,0.10);margin:8px 6px';
+        hr.style.cssText = 'height:1px;background:var(--border, #e5e5ec);margin:8px 6px';
         menu.appendChild(hr);
       };
 
@@ -4548,10 +4548,10 @@ class ProofEditorImpl implements ProofEditor {
         item.style.cssText = `
           width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
           padding:10px 12px;min-height:44px;border-radius:10px;border:0;background:transparent;
-          color:${options?.destructive ? '#fca5a5' : (options?.subtle ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.92)')};
+          color:${options?.destructive ? 'var(--err, #dc2626)' : (options?.subtle ? 'var(--text-2, #4b4e60)' : 'var(--text, #191a23)')};
           font-size:12px;font-weight:${options?.subtle ? '500' : '600'};cursor:pointer;text-align:left;
         `;
-        item.onmouseenter = () => { if (!options?.disabled) item.style.background = 'rgba(255,255,255,0.08)'; };
+        item.onmouseenter = () => { if (!options?.disabled) item.style.background = 'var(--surface-2, #f4f4f8)'; };
         item.onmouseleave = () => { item.style.background = 'transparent'; };
         if (options?.disabled) {
           item.disabled = true;
@@ -4581,10 +4581,10 @@ class ProofEditorImpl implements ProofEditor {
       if (agentsNow.length === 0) {
         const header = document.createElement('div');
         header.textContent = 'Add a coding agent';
-        header.style.cssText = 'padding:8px 12px 4px;color:#fff;font-size:13px;font-weight:700;';
+        header.style.cssText = 'padding:8px 12px 4px;color:var(--text, #191a23);font-size:13px;font-weight:700;';
         const body = document.createElement('div');
         body.textContent = 'Invite a coding agent — one that can run shell commands and make HTTP requests, like Claude Code — to edit, suggest, and review this doc.';
-        body.style.cssText = 'padding:0 12px 8px;color:rgba(255,255,255,0.78);font-size:12px;line-height:1.35;';
+        body.style.cssText = 'padding:0 12px 8px;color:var(--text-2, #4b4e60);font-size:12px;line-height:1.35;';
         menu.append(header, body);
         addMenuButton('Copy agent invite link', async () => this.copyAgentInviteWithFallback(), {
           successText: 'Copied',
@@ -4597,12 +4597,12 @@ class ProofEditorImpl implements ProofEditor {
       } else {
         const header = document.createElement('div');
         header.textContent = `Agent collaborators (${agentsNow.length})`;
-        header.style.cssText = 'padding:8px 12px 6px;color:rgba(255,255,255,0.85);font-size:11px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;';
+        header.style.cssText = 'padding:8px 12px 6px;color:var(--text-2, #4b4e60);font-size:11px;font-weight:700;letter-spacing:0.03em;text-transform:uppercase;';
         menu.appendChild(header);
         for (const agent of agentsNow.slice(0, 6)) {
           const row = document.createElement('div');
           row.dataset.agentRow = agent.id;
-          row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;min-height:44px;border-radius:10px;background:rgba(255,255,255,0.04);margin-bottom:4px;';
+          row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;min-height:44px;border-radius:10px;background:var(--surface-2, #f4f4f8);margin-bottom:4px;';
           const left = document.createElement('div');
           left.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;';
           const family = this.getAgentPresenceVariant(agent.id);
@@ -4615,10 +4615,10 @@ class ProofEditorImpl implements ProofEditor {
           });
           face.style.filter = 'drop-shadow(0 1px 1px rgba(0,0,0,0.16))';
           const dot = document.createElement('span');
-          dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${agent.status === 'idle' ? '#6b7280' : '#10b981'};display:inline-block;flex-shrink:0`;
+          dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${agent.status === 'idle' ? 'var(--text-muted, #797d90)' : 'var(--ok, #16a34a)'};display:inline-block;flex-shrink:0`;
           const name = document.createElement('span');
           name.textContent = agent.name;
-          name.style.cssText = 'color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+          name.style.cssText = 'color:var(--text, #191a23);font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
           left.append(face, dot, name);
 
           const right = document.createElement('div');
@@ -4630,11 +4630,11 @@ class ProofEditorImpl implements ProofEditor {
             disconnect.setAttribute('aria-label', `Disconnect ${agent.name}`);
             disconnect.textContent = 'Disconnect';
             disconnect.style.cssText = `
-              border:0;background:transparent;color:#fca5a5;font-size:11px;font-weight:600;
+              border:0;background:transparent;color:var(--err, #dc2626);font-size:11px;font-weight:600;
               padding:3px 0;cursor:pointer;border-radius:6px;
             `;
-            disconnect.onmouseenter = () => { disconnect.style.color = '#fecaca'; };
-            disconnect.onmouseleave = () => { disconnect.style.color = '#fca5a5'; };
+            disconnect.onmouseenter = () => { disconnect.style.color = 'color-mix(in srgb, var(--err, #dc2626) 85%, var(--text, #191a23))'; };
+            disconnect.onmouseleave = () => { disconnect.style.color = 'var(--err, #dc2626)'; };
             disconnect.onclick = async (event) => {
               event.stopPropagation();
               disconnect.disabled = true;
@@ -4731,11 +4731,11 @@ class ProofEditorImpl implements ProofEditor {
       top: 0;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(255,255,255,0.94);
+      background: color-mix(in srgb, var(--surface, #ffffff) 94%, transparent);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
-      color: #374151;
-      border: 1px solid rgba(0,0,0,0.06);
+      color: var(--text-2, #4b4e60);
+      border: 1px solid var(--border, #e5e5ec);
       border-radius: 28px;
       padding: 10px 12px 10px 22px;
       font-size: 13px;
@@ -4746,7 +4746,7 @@ class ProofEditorImpl implements ProofEditor {
       gap: 12px;
       max-width: calc(100vw - 24px);
       box-sizing: border-box;
-      box-shadow: 0 6px 24px rgba(0,0,0,0.06), 0 0 0 0.5px rgba(0,0,0,0.03);
+      box-shadow: var(--sh-md, 0 4px 14px rgba(20,20,45,.09), 0 1px 3px rgba(20,20,45,.05));
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       min-width: min(480px, calc(100vw - 24px));
     `;
@@ -4958,7 +4958,7 @@ class ProofEditorImpl implements ProofEditor {
       top: 0;
       left: 0;
       right: 0;
-      background: #f59e0b;
+      background: var(--warn, #d97706);
       color: white;
       padding: 8px 16px;
       text-align: center;
@@ -4991,8 +4991,8 @@ class ProofEditorImpl implements ProofEditor {
     }
 
     if (this.isShareMode) {
-      document.documentElement.style.background = '#fff';
-      document.body.style.background = '#fff';
+      document.documentElement.style.background = 'var(--surface, #ffffff)';
+      document.body.style.background = 'var(--surface, #ffffff)';
     }
   }
 
@@ -5054,7 +5054,7 @@ class ProofEditorImpl implements ProofEditor {
         top: 0;
         left: 0;
         right: 0;
-        background: #2563eb;
+        background: var(--link, #2563eb);
         color: white;
         padding: 8px 16px;
         text-align: center;
@@ -5103,7 +5103,7 @@ class ProofEditorImpl implements ProofEditor {
       top: 0;
       left: 0;
       right: 0;
-      background: #ef4444;
+      background: var(--err, #dc2626);
       color: white;
       padding: 8px 16px;
       text-align: center;

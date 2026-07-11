@@ -87,10 +87,10 @@ function createMenuElement(hasSelection: boolean): HTMLElement {
       .review-menu {
         position: fixed;
         z-index: 10001;
-        background: var(--proof-bg, #ffffff);
-        border: 1px solid var(--proof-border, #e5e7eb);
-        border-radius: 8px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        background: var(--surface, #ffffff);
+        border: 1px solid var(--border, #e5e5ec);
+        border-radius: var(--r-md, 8px);
+        box-shadow: var(--sh-lg, 0 14px 38px rgba(20,20,45,.14), 0 2px 8px rgba(20,20,45,.06));
         min-width: 220px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 13px;
@@ -111,8 +111,8 @@ function createMenuElement(hasSelection: boolean): HTMLElement {
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        color: var(--proof-text-muted, #6b7280);
-        border-bottom: 1px solid var(--proof-border, #e5e7eb);
+        color: var(--text-muted, #797d90);
+        border-bottom: 1px solid var(--border, #e5e5ec);
       }
 
       .review-menu-skills {
@@ -129,12 +129,12 @@ function createMenuElement(hasSelection: boolean): HTMLElement {
         border: none;
         text-align: left;
         cursor: pointer;
-        color: var(--proof-text, #1f2937);
+        color: var(--text, #191a23);
         transition: background 0.1s ease;
       }
 
       .review-menu-skill:hover {
-        background: var(--proof-bg-hover, #f3f4f6);
+        background: var(--surface-3, #ececf2);
       }
 
       .review-skill-icon {
@@ -150,15 +150,15 @@ function createMenuElement(hasSelection: boolean): HTMLElement {
 
       .review-skill-scope {
         font-size: 11px;
-        color: var(--proof-text-muted, #9ca3af);
-        background: var(--proof-bg-secondary, #f3f4f6);
+        color: var(--text-faint, #a6a9b8);
+        background: var(--surface-2, #f4f4f8);
         padding: 2px 6px;
-        border-radius: 3px;
+        border-radius: var(--r-xs, 4px);
       }
 
       .review-menu-footer {
         padding: 4px 0;
-        border-top: 1px solid var(--proof-border, #e5e7eb);
+        border-top: 1px solid var(--border, #e5e5ec);
       }
 
       .review-menu-stop {
@@ -171,15 +171,15 @@ function createMenuElement(hasSelection: boolean): HTMLElement {
         border: none;
         text-align: left;
         cursor: pointer;
-        color: var(--proof-danger, #b91c1c);
+        color: var(--err, #dc2626);
         font-size: 13px;
         font-weight: 600;
         transition: all 0.1s ease;
       }
 
       .review-menu-stop:hover {
-        background: var(--proof-danger-bg, rgba(185, 28, 28, 0.08));
-        color: var(--proof-danger-hover, #991b1b);
+        background: color-mix(in srgb, var(--err, #dc2626) 10%, transparent);
+        color: var(--err, #dc2626);
       }
 
       .review-menu-manage {
@@ -192,29 +192,14 @@ function createMenuElement(hasSelection: boolean): HTMLElement {
         border: none;
         text-align: left;
         cursor: pointer;
-        color: var(--proof-text-muted, #6b7280);
+        color: var(--text-muted, #797d90);
         font-size: 13px;
         transition: all 0.1s ease;
       }
 
       .review-menu-manage:hover {
-        background: var(--proof-bg-hover, #f3f4f6);
-        color: var(--proof-text, #1f2937);
-      }
-
-      /* Dark mode */
-      @media (prefers-color-scheme: dark) {
-        .review-menu {
-          --proof-bg: #1f2937;
-          --proof-bg-secondary: #374151;
-          --proof-bg-hover: #374151;
-          --proof-border: #4b5563;
-          --proof-text: #f9fafb;
-          --proof-text-muted: #9ca3af;
-          --proof-danger: #fca5a5;
-          --proof-danger-hover: #fecaca;
-          --proof-danger-bg: rgba(252, 165, 165, 0.12);
-        }
+        background: var(--surface-3, #ececf2);
+        color: var(--text, #191a23);
       }
     `;
     document.head.appendChild(style);
@@ -421,19 +406,19 @@ export function createReviewButton(
         align-items: center;
         gap: 6px;
         padding: 6px 12px;
-        background: var(--proof-bg, #ffffff);
-        border: 1px solid var(--proof-border, #e5e7eb);
-        border-radius: 6px;
+        background: var(--surface, #ffffff);
+        border: 1px solid var(--border, #e5e5ec);
+        border-radius: var(--r-sm, 6px);
         font-size: 13px;
         font-weight: 500;
-        color: var(--proof-text, #1f2937);
+        color: var(--text, #191a23);
         cursor: pointer;
         transition: all 0.1s ease;
       }
 
       .review-trigger-button:hover {
-        background: var(--proof-bg-hover, #f3f4f6);
-        border-color: var(--proof-border-hover, #d1d5db);
+        background: var(--surface-3, #ececf2);
+        border-color: var(--border-strong, #d4d5df);
       }
 
       .review-trigger-icon {
@@ -442,7 +427,7 @@ export function createReviewButton(
 
       .review-trigger-arrow {
         font-size: 10px;
-        color: var(--proof-text-muted, #9ca3af);
+        color: var(--text-faint, #a6a9b8);
       }
     `;
     document.head.appendChild(style);

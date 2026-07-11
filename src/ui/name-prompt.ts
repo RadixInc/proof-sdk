@@ -57,24 +57,24 @@ export function promptForName(): Promise<string> {
     const dialog = document.createElement('div');
     dialog.dataset.proofNamePrompt = 'dialog';
     dialog.style.cssText = `
-      background: white; border-radius: 16px; padding: 36px 32px 32px;
+      background: var(--surface, #ffffff); border-radius: var(--r-xl, 16px); padding: 36px 32px 32px;
       max-width: 340px; width: 90%;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05);
+      box-shadow: var(--sh-xl, 0 28px 64px rgba(20,20,45,.22)), 0 0 0 1px rgba(0,0,0,0.05);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       text-align: center;
     `;
 
     const wordmark = document.createElement('div');
     wordmark.textContent = 'Proof';
-    wordmark.style.cssText = 'font-size: 15px; font-weight: 600; color: #333; letter-spacing: -0.3px; margin-bottom: 20px;';
+    wordmark.style.cssText = 'font-size: 15px; font-weight: 600; color: var(--text, #191a23); letter-spacing: -0.3px; margin-bottom: 20px;';
 
     const title = document.createElement('h2');
     title.textContent = 'Choose a display name';
-    title.style.cssText = 'margin: 0 0 6px; font-size: 18px; font-weight: 600; color: #111;';
+    title.style.cssText = 'margin: 0 0 6px; font-size: 18px; font-weight: 600; color: var(--text, #191a23);';
 
     const subtitle = document.createElement('p');
     subtitle.textContent = 'Your name appears on comments and edits.';
-    subtitle.style.cssText = 'margin: 0 0 20px; color: #888; font-size: 13px; line-height: 1.4;';
+    subtitle.style.cssText = 'margin: 0 0 20px; color: var(--text-muted, #797d90); font-size: 13px; line-height: 1.4;';
 
     const input = document.createElement('input');
     input.dataset.proofNamePrompt = 'input';
@@ -85,23 +85,23 @@ export function promptForName(): Promise<string> {
     input.enterKeyHint = 'done';
     input.maxLength = MAX_VIEWER_NAME_LENGTH;
     input.style.cssText = `
-      width: 100%; padding: 10px 14px; border: 1px solid #e0e0e0;
-      border-radius: 10px; font-size: 16px; outline: none;
+      width: 100%; padding: 10px 14px; border: 1px solid var(--border, #e5e5ec);
+      border-radius: var(--r-lg, 12px); font-size: 16px; outline: none;
       box-sizing: border-box; text-align: center;
       transition: border-color 0.15s;
     `;
     input.addEventListener('focus', () => {
-      input.style.borderColor = '#333';
+      input.style.borderColor = 'var(--text, #191a23)';
     });
     input.addEventListener('blur', () => {
-      input.style.borderColor = '#e0e0e0';
+      input.style.borderColor = 'var(--border, #e5e5ec)';
     });
 
     const counter = document.createElement('div');
     counter.dataset.proofNamePrompt = 'counter';
     counter.style.cssText = `
       margin-top: 8px; text-align: right; font-size: 12px;
-      color: #8a8a8a; line-height: 1;
+      color: var(--text-muted, #797d90); line-height: 1;
     `;
 
     const validationMessage = document.createElement('p');
@@ -109,7 +109,7 @@ export function promptForName(): Promise<string> {
     validationMessage.textContent = 'Please enter your name or continue anonymously.';
     validationMessage.style.cssText = `
       margin: 8px 0 0; min-height: 16px; text-align: left;
-      color: #b42318; font-size: 12px; line-height: 1.25;
+      color: var(--err, #dc2626); font-size: 12px; line-height: 1.25;
       opacity: 0; transition: opacity 0.12s;
     `;
 
@@ -118,16 +118,16 @@ export function promptForName(): Promise<string> {
     button.textContent = 'Continue';
     button.style.cssText = `
       width: 100%; margin-top: 12px; min-height: 44px; padding: 10px 14px;
-      background: #111; color: white; border: none;
-      border-radius: 10px; font-size: 15px; font-weight: 500;
+      background: var(--btn-bg, #191a23); color: var(--btn-fg, #ffffff); border: none;
+      border-radius: var(--r-lg, 12px); font-size: 15px; font-weight: 500;
       cursor: pointer; transition: background 0.15s;
     `;
     button.addEventListener('mouseenter', () => {
       if (button.disabled) return;
-      button.style.background = '#333';
+      button.style.background = 'var(--btn-bg-hover, #2e303e)';
     });
     button.addEventListener('mouseleave', () => {
-      button.style.background = '#111';
+      button.style.background = 'var(--btn-bg, #191a23)';
     });
 
     const skipLink = document.createElement('button');
@@ -136,17 +136,17 @@ export function promptForName(): Promise<string> {
     skipLink.setAttribute('aria-label', 'Continue anonymously');
     skipLink.style.cssText = `
       width: 100%; margin-top: 8px; min-height: 44px; padding: 10px 14px;
-      background: #f5f5f5; color: #444; border: 1px solid #e5e5e5;
-      border-radius: 10px; font-size: 14px; font-weight: 500;
+      background: var(--surface-2, #f4f4f8); color: var(--text-2, #4b4e60); border: 1px solid var(--border, #e5e5ec);
+      border-radius: var(--r-lg, 12px); font-size: 14px; font-weight: 500;
       cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s;
     `;
     skipLink.addEventListener('mouseenter', () => {
-      skipLink.style.background = '#ededed';
-      skipLink.style.color = '#222';
+      skipLink.style.background = 'var(--surface-3, #ececf2)';
+      skipLink.style.color = 'var(--text, #191a23)';
     });
     skipLink.addEventListener('mouseleave', () => {
-      skipLink.style.background = '#f5f5f5';
-      skipLink.style.color = '#444';
+      skipLink.style.background = 'var(--surface-2, #f4f4f8)';
+      skipLink.style.color = 'var(--text-2, #4b4e60)';
     });
 
     const submit = () => {

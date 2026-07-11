@@ -21,18 +21,20 @@
  * Palette: Soft Focus - designed for the Proof editor surface
  */
 const KNOWN_COLORS: Record<string, string> = {
-  // Origin/authorship
-  human: '#6EE7B7',  // Soft mint
-  ai: '#A5B4FC',     // Soft lavender
-  system: '#93C5FD', // Soft sky blue
+  // Origin/authorship — resolved through the theme tokens in index.html so the
+  // gutter follows light/dark appearance switches; fallbacks are the light values.
+  human: 'var(--human-color, #0d9488)',  // Teal
+  ai: 'var(--ai-color, #7c3aed)',        // Violet
+  mixed: 'var(--mixed-bar, #c81d77)',    // Teal→violet gradient bar (fusion, colourblind-safe)
+  system: 'var(--system-color, #93C5FD)', // Soft sky blue
 
   // Mark kinds (for future use in sidebar counts)
-  approved: '#2DD4BF',   // Teal (distinct from human)
-  flagged: '#FCA5A5',    // Dusty rose
-  comment: '#FCD34D',    // Soft gold
-  insert: '#6EE7B7',     // Soft mint (same as human)
-  delete: '#FCA5A5',     // Dusty rose (same as flagged)
-  replace: '#FCD34D',    // Soft gold (same as comment)
+  approved: 'var(--ok, #16a34a)',
+  flagged: 'var(--flagged-color, #dc2626)',
+  comment: 'var(--comment-color, #d97706)',
+  insert: 'var(--insert, #16a34a)',
+  delete: 'var(--delete, #dc2626)',
+  replace: 'var(--compose, #d97706)',
 };
 
 /**
