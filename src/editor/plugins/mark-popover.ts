@@ -89,6 +89,21 @@ function formatTimestamp(iso: string | undefined): string {
   return date.toLocaleString();
 }
 
+function formatRelativeTime(iso: string | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const diff = Date.now() - date.getTime();
+  if (diff < 60_000) return 'just now';
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString();
+}
+
 function resolveAnchorRange(view: EditorView, mark: Mark, pos?: number | null): MarkRange | null {
   const [resolved] = resolveMarks(view.state.doc, [mark]);
   const ranges = resolved?.resolvedRanges ?? (resolved?.resolvedRange ? [resolved.resolvedRange] : []);
@@ -1217,24 +1232,44 @@ class MarkPopoverController {
   private renderSuggestion(mark: Mark): void {
     this.popover.innerHTML = '';
 
+    // Header: kind chip in the review color + attribution
     const header = document.createElement('div');
-    header.className = 'mark-popover-header';
-    header.textContent = 'Suggestion';
+    header.className = 'mark-popover-sughead';
 
+    const kindChip = document.createElement('span');
+    kindChip.className = `mark-popover-kind mark-popover-kind-${mark.kind}`;
+    kindChip.textContent = mark.kind === 'insert' ? 'Insert' : mark.kind === 'delete' ? 'Delete' : 'Replace';
+    header.appendChild(kindChip);
+
+    const who = document.createElement('span');
+    who.className = 'mark-popover-who';
+    const relative = formatRelativeTime(mark.at);
+    who.textContent = relative ? `${getActorName(mark.by)} · ${relative}` : getActorName(mark.by);
+    header.appendChild(who);
+
+    // Body: the actual diff — old text struck through, new text in the insert wash
     const body = document.createElement('div');
-    body.className = 'mark-popover-body';
+    body.className = 'mark-popover-diff';
 
-    let detail = '';
-    if (mark.kind === 'insert') {
-      const data = mark.data as InsertData | undefined;
-      detail = data?.content ?? '';
-    } else if (mark.kind === 'replace') {
-      const data = mark.data as ReplaceData | undefined;
-      detail = data?.content ?? '';
-    } else if (mark.kind === 'delete') {
-      detail = mark.quote ?? '';
+    const newContent = mark.kind === 'insert'
+      ? (mark.data as InsertData | undefined)?.content ?? ''
+      : mark.kind === 'replace'
+        ? (mark.data as ReplaceData | undefined)?.content ?? ''
+        : '';
+
+    if (mark.kind !== 'insert' && mark.quote) {
+      const del = document.createElement('span');
+      del.className = 'mark-popover-diff-del';
+      del.textContent = mark.quote;
+      body.appendChild(del);
     }
-    body.textContent = detail;
+    if (newContent) {
+      if (body.childNodes.length > 0) body.appendChild(document.createTextNode(' '));
+      const ins = document.createElement('span');
+      ins.className = 'mark-popover-diff-ins';
+      ins.textContent = newContent;
+      body.appendChild(ins);
+    }
 
     const actions = document.createElement('div');
     actions.className = 'mark-popover-actions';

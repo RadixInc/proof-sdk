@@ -527,6 +527,64 @@
       color: var(--text);
     }
 
+    /* Suggestion header: kind chip + attribution */
+    .mark-popover-sughead {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 10px;
+    }
+
+    .mark-popover-kind {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: var(--r-pill);
+    }
+
+    .mark-popover-kind-insert {
+      color: var(--insert);
+      background: var(--insert-wash);
+    }
+
+    .mark-popover-kind-replace,
+    .mark-popover-kind-delete {
+      color: var(--delete);
+      background: var(--delete-wash);
+    }
+
+    .mark-popover-who {
+      margin-left: auto;
+      font-size: 12.5px;
+      color: var(--text-muted);
+    }
+
+    /* Suggestion body: the diff itself */
+    .mark-popover-diff {
+      font-size: 13.5px;
+      line-height: 1.5;
+      margin-bottom: 12px;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .mark-popover-diff-del {
+      color: var(--text-muted);
+      text-decoration: line-through;
+      text-decoration-color: var(--delete);
+    }
+
+    .mark-popover-diff-ins {
+      color: var(--text);
+      background: var(--insert-wash);
+      border-radius: 2px;
+      padding: 0 2px;
+      box-decoration-break: clone;
+      -webkit-box-decoration-break: clone;
+    }
+
     /* Accept is the one filled action in the review language */
     .mark-popover-actions button.mark-popover-accept {
       background: var(--insert);
