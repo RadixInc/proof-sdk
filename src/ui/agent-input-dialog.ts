@@ -70,10 +70,10 @@ function createDialogElement(): HTMLElement {
     .agent-input-dialog {
       position: fixed;
       z-index: 10000;
-      background: var(--proof-bg, #ffffff);
-      border: 1px solid var(--proof-border, #e5e7eb);
-      border-radius: 8px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      background: var(--surface, #ffffff);
+      border: 1px solid var(--border, #e5e5ec);
+      border-radius: var(--r-md, 8px);
+      box-shadow: var(--sh-lg, 0 14px 38px rgba(20,20,45,.14), 0 2px 8px rgba(20,20,45,.06));
       width: 400px;
       max-width: calc(100vw - 32px);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -98,12 +98,12 @@ function createDialogElement(): HTMLElement {
       justify-content: space-between;
       align-items: center;
       padding: 12px 16px;
-      border-bottom: 1px solid var(--proof-border, #e5e7eb);
+      border-bottom: 1px solid var(--border, #e5e5ec);
     }
 
     .agent-input-dialog-title {
       font-weight: 600;
-      color: var(--proof-text, #1f2937);
+      color: var(--text, #191a23);
     }
 
     .agent-input-dialog-close {
@@ -111,13 +111,13 @@ function createDialogElement(): HTMLElement {
       border: none;
       font-size: 20px;
       cursor: pointer;
-      color: var(--proof-text-muted, #6b7280);
+      color: var(--text-muted, #797d90);
       padding: 0;
       line-height: 1;
     }
 
     .agent-input-dialog-close:hover {
-      color: var(--proof-text, #1f2937);
+      color: var(--text, #191a23);
     }
 
     .agent-input-dialog-body {
@@ -125,12 +125,12 @@ function createDialogElement(): HTMLElement {
     }
 
     .agent-input-dialog-selection {
-      background: var(--proof-bg-secondary, #f3f4f6);
-      border-radius: 4px;
+      background: var(--surface-2, #f4f4f8);
+      border-radius: var(--r-xs, 4px);
       padding: 8px 12px;
       margin-bottom: 12px;
       font-size: 13px;
-      color: var(--proof-text-muted, #6b7280);
+      color: var(--text-muted, #797d90);
       max-height: 80px;
       overflow-y: auto;
       white-space: pre-wrap;
@@ -143,26 +143,26 @@ function createDialogElement(): HTMLElement {
 
     .agent-input-dialog-textarea {
       width: 100%;
-      border: 1px solid var(--proof-border, #e5e7eb);
-      border-radius: 4px;
+      border: 1px solid var(--border, #e5e5ec);
+      border-radius: var(--r-sm, 6px);
       padding: 10px 12px;
       font-family: inherit;
       font-size: 14px;
       resize: vertical;
       min-height: 60px;
-      color: var(--proof-text, #1f2937);
-      background: var(--proof-bg, #ffffff);
+      color: var(--text, #191a23);
+      background: var(--surface, #ffffff);
     }
 
     .agent-input-dialog-textarea:focus {
       outline: none;
-      border-color: var(--proof-primary, #2563eb);
-      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+      border-color: var(--link, #2563eb);
+      box-shadow: 0 0 0 3px var(--focus, rgba(37, 99, 235, 0.32));
     }
 
     .agent-input-dialog-footer {
       padding: 12px 16px;
-      border-top: 1px solid var(--proof-border, #e5e7eb);
+      border-top: 1px solid var(--border, #e5e5ec);
     }
 
     .agent-input-dialog-quick-actions {
@@ -173,19 +173,19 @@ function createDialogElement(): HTMLElement {
     }
 
     .agent-input-quick-action {
-      background: var(--proof-bg-secondary, #f3f4f6);
-      border: 1px solid var(--proof-border, #e5e7eb);
-      border-radius: 4px;
+      background: var(--surface-2, #f4f4f8);
+      border: 1px solid var(--border, #e5e5ec);
+      border-radius: var(--r-xs, 4px);
       padding: 4px 10px;
       font-size: 12px;
       cursor: pointer;
-      color: var(--proof-text-muted, #6b7280);
+      color: var(--text-muted, #797d90);
       transition: all 0.1s ease;
     }
 
     .agent-input-quick-action:hover {
-      background: var(--proof-bg-hover, #e5e7eb);
-      color: var(--proof-text, #1f2937);
+      background: var(--surface-3, #ececf2);
+      color: var(--text, #191a23);
     }
 
     .agent-input-dialog-actions {
@@ -197,7 +197,7 @@ function createDialogElement(): HTMLElement {
     .agent-input-dialog-cancel,
     .agent-input-dialog-submit {
       padding: 8px 16px;
-      border-radius: 4px;
+      border-radius: var(--r-sm, 6px);
       font-size: 14px;
       font-weight: 500;
       cursor: pointer;
@@ -206,39 +206,27 @@ function createDialogElement(): HTMLElement {
 
     .agent-input-dialog-cancel {
       background: none;
-      border: 1px solid var(--proof-border, #e5e7eb);
-      color: var(--proof-text-muted, #6b7280);
+      border: 1px solid var(--border, #e5e5ec);
+      color: var(--text-muted, #797d90);
     }
 
     .agent-input-dialog-cancel:hover {
-      background: var(--proof-bg-secondary, #f3f4f6);
+      background: var(--surface-2, #f4f4f8);
     }
 
     .agent-input-dialog-submit {
-      background: var(--proof-primary, #2563eb);
+      background: var(--btn-bg, #191a23);
       border: none;
-      color: white;
+      color: var(--btn-fg, #ffffff);
     }
 
     .agent-input-dialog-submit:hover {
-      background: var(--proof-primary-hover, #1d4ed8);
+      background: var(--btn-bg-hover, #2e303e);
     }
 
     .agent-input-dialog-submit:disabled {
       opacity: 0.5;
       cursor: not-allowed;
-    }
-
-    /* Dark mode support */
-    @media (prefers-color-scheme: dark) {
-      .agent-input-dialog {
-        --proof-bg: #1f2937;
-        --proof-bg-secondary: #374151;
-        --proof-bg-hover: #4b5563;
-        --proof-border: #4b5563;
-        --proof-text: #f9fafb;
-        --proof-text-muted: #9ca3af;
-      }
     }
   `;
 

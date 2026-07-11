@@ -59,15 +59,15 @@ function injectStyles(): void {
       animation: welcome-fade-out 150ms ease-in forwards;
     }
     .welcome-card {
-      background: #fff;
-      border-radius: 12px;
-      border: 1px solid #e5e7eb;
+      background: var(--surface, #ffffff);
+      border-radius: var(--r-lg, 12px);
+      border: 1px solid var(--border, #e5e5ec);
       padding: 0;
       max-width: 460px;
       width: 92%;
-      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+      box-shadow: var(--sh-xl, 0 28px 64px rgba(20,20,45,.22));
       animation: welcome-slide-up 300ms cubic-bezier(0.16, 1, 0.3, 1);
-      color: #1a1a1a;
+      color: var(--text, #191a23);
       overflow: hidden;
     }
     .welcome-body { padding: 32px 32px 0; }
@@ -75,19 +75,19 @@ function injectStyles(): void {
       margin: 0 0 8px;
       font-size: 22px;
       font-weight: 700;
-      color: #111;
+      color: var(--text, #191a23);
       letter-spacing: -0.4px;
     }
     .welcome-card .welcome-subtitle {
       margin: 0 0 20px;
       font-size: 15px;
-      color: #6b7280;
+      color: var(--text-muted, #797d90);
       line-height: 1.55;
     }
     .welcome-what-happens {
-      background: #f9fafb;
-      border: 1px solid #f3f4f6;
-      border-radius: 8px;
+      background: var(--surface-2, #f4f4f8);
+      border: 1px solid var(--border, #e5e5ec);
+      border-radius: var(--r-md, 8px);
       padding: 16px 20px;
       margin-bottom: 20px;
     }
@@ -96,7 +96,7 @@ function injectStyles(): void {
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      color: #6b7280;
+      color: var(--text-muted, #797d90);
       margin-bottom: 10px;
     }
     .welcome-what-happens-list {
@@ -109,7 +109,7 @@ function injectStyles(): void {
     }
     .welcome-what-happens-list li {
       font-size: 14px;
-      color: #374151;
+      color: var(--text-2, #4b4e60);
       line-height: 1.4;
       padding-left: 20px;
       position: relative;
@@ -122,23 +122,23 @@ function injectStyles(): void {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #d1d5db;
+      background: var(--border-strong, #d4d5df);
     }
     .welcome-prompt-label {
       font-size: 13px;
       font-weight: 600;
-      color: #374151;
+      color: var(--text-2, #4b4e60);
       margin-bottom: 8px;
     }
     .welcome-prompt-box {
-      background: #f9fafb;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
+      background: var(--surface-2, #f4f4f8);
+      border: 1px solid var(--border, #e5e5ec);
+      border-radius: var(--r-md, 8px);
       padding: 14px 16px;
       font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
       font-size: 12px;
       line-height: 1.6;
-      color: #374151;
+      color: var(--text-2, #4b4e60);
       white-space: pre-wrap;
       word-break: break-word;
       max-height: 100px;
@@ -150,10 +150,10 @@ function injectStyles(): void {
       width: 100%;
       margin-top: 14px;
       padding: 12px 16px;
-      background: #111;
+      background: var(--btn-bg, #191a23);
       border: none;
-      border-radius: 8px;
-      color: #fff;
+      border-radius: var(--r-md, 8px);
+      color: var(--btn-fg, #ffffff);
       font-size: 14px;
       font-weight: 600;
       cursor: pointer;
@@ -161,25 +161,25 @@ function injectStyles(): void {
       font-family: inherit;
       letter-spacing: -0.1px;
     }
-    .welcome-copy-btn:hover { background: #333; }
+    .welcome-copy-btn:hover { background: var(--btn-bg-hover, #2e303e); }
     .welcome-copy-btn:active { background: #000; }
-    .welcome-copy-btn.copied { background: #16a34a; }
+    .welcome-copy-btn.copied { background: var(--ok, #16a34a); }
     .welcome-footer { padding: 16px 32px 28px; text-align: center; }
     .welcome-dismiss-btn {
       padding: 0;
       background: none;
       border: none;
-      color: #9ca3af;
+      color: var(--text-faint, #a6a9b8);
       font-size: 13px;
       cursor: pointer;
       transition: color 100ms;
       font-family: inherit;
     }
-    .welcome-dismiss-btn:hover { color: #6b7280; }
+    .welcome-dismiss-btn:hover { color: var(--text-muted, #797d90); }
     .welcome-hint {
       margin-top: 14px;
       font-size: 12px;
-      color: #9ca3af;
+      color: var(--text-faint, #a6a9b8);
       line-height: 1.5;
     }
     @media (max-width: 520px) {

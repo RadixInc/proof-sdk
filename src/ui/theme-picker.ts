@@ -1,24 +1,32 @@
 export type Theme = 'default' | 'whitey';
+export type Appearance = 'light' | 'dark';
 
 export interface ThemePickerOptions {
   defaultTheme?: Theme;
+  defaultAppearance?: Appearance;
   container?: HTMLElement;
   onChange?: (theme: Theme) => void;
+  onAppearanceChange?: (appearance: Appearance) => void;
 }
 
 export class ThemePicker {
   private currentTheme: Theme;
+  private currentAppearance: Appearance;
   private container: HTMLElement | null;
   private onChange?: (theme: Theme) => void;
+  private onAppearanceChange?: (appearance: Appearance) => void;
 
   constructor(options: ThemePickerOptions = {}) {
     this.currentTheme = options.defaultTheme || this.loadSavedTheme();
+    this.currentAppearance = options.defaultAppearance || this.loadSavedAppearance();
     this.container = options.container || null;
     this.onChange = options.onChange;
+    this.onAppearanceChange = options.onAppearanceChange;
   }
 
   init(): void {
     this.applyTheme(this.currentTheme);
+    this.applyAppearance(this.currentAppearance);
     // Don't render the dropdown - theme is controlled from native View menu
     // this.render();
   }
@@ -35,6 +43,18 @@ export class ThemePicker {
     localStorage.setItem('proof-theme', theme);
   }
 
+  private loadSavedAppearance(): Appearance {
+    const saved = localStorage.getItem('proof-appearance');
+    if (saved === 'light' || saved === 'dark') {
+      return saved;
+    }
+    return 'light';
+  }
+
+  private saveAppearance(appearance: Appearance): void {
+    localStorage.setItem('proof-appearance', appearance);
+  }
+
   setTheme(theme: Theme): void {
     this.currentTheme = theme;
     this.applyTheme(theme);
@@ -47,8 +67,23 @@ export class ThemePicker {
     return this.currentTheme;
   }
 
+  setAppearance(appearance: Appearance): void {
+    this.currentAppearance = appearance;
+    this.applyAppearance(appearance);
+    this.saveAppearance(appearance);
+    this.onAppearanceChange?.(appearance);
+  }
+
+  getAppearance(): Appearance {
+    return this.currentAppearance;
+  }
+
   private applyTheme(theme: Theme): void {
     document.documentElement.setAttribute('data-theme', theme);
+  }
+
+  private applyAppearance(appearance: Appearance): void {
+    document.documentElement.setAttribute('data-appearance', appearance);
   }
 
   private render(): void {
