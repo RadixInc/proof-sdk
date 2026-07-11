@@ -1243,6 +1243,7 @@ class MarkPopoverController {
     const applyButton = document.createElement('button');
     applyButton.type = 'button';
     applyButton.textContent = 'Apply';
+    applyButton.classList.add('mark-popover-accept');
     installTouchSafeButton(applyButton, () => {
       if (!canEdit) return;
       const proof = getProofEditorApi();
@@ -1257,6 +1258,7 @@ class MarkPopoverController {
     const rejectButton = document.createElement('button');
     rejectButton.type = 'button';
     rejectButton.textContent = 'Reject';
+    rejectButton.classList.add('mark-popover-reject');
     installTouchSafeButton(rejectButton, () => {
       if (!canEdit) return;
       const proof = getProofEditorApi();
