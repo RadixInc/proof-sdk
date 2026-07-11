@@ -1110,6 +1110,63 @@
       border-left-color: var(--human);
     }
 
+    /* ============ APPEARANCE / READING SWITCHER (bottom-right) ============ */
+    .proof-switcher {
+      position: fixed;
+      bottom: calc(22px + var(--sab));
+      right: 22px;
+      z-index: 1000;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-pill);
+      box-shadow: var(--sh-md);
+      padding: 6px;
+      font-family: var(--ui-font);
+    }
+
+    .proof-switcher-lab {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      padding-left: 6px;
+    }
+
+    .proof-switcher-seg {
+      display: flex;
+      background: var(--surface-2);
+      border-radius: var(--r-pill);
+      padding: 3px;
+    }
+
+    .proof-switcher-seg button {
+      border: 0;
+      background: transparent;
+      font-family: var(--ui-font);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: var(--r-pill);
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+
+    .proof-switcher-seg button.on {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: var(--sh-sm);
+    }
+
+    /* The mobile review strip owns the bottom edge on small screens */
+    @media (max-width: 900px) {
+      .proof-switcher { display: none; }
+    }
+
     /* Loading state */
     .loading {
       display: flex;

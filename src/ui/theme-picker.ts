@@ -27,8 +27,7 @@ export class ThemePicker {
   init(): void {
     this.applyTheme(this.currentTheme);
     this.applyAppearance(this.currentAppearance);
-    // Don't render the dropdown - theme is controlled from native View menu
-    // this.render();
+    this.render();
   }
 
   private loadSavedTheme(): Theme {
@@ -71,6 +70,7 @@ export class ThemePicker {
     this.currentAppearance = appearance;
     this.applyAppearance(appearance);
     this.saveAppearance(appearance);
+    this.updateUI();
     this.onAppearanceChange?.(appearance);
   }
 
@@ -86,33 +86,49 @@ export class ThemePicker {
     document.documentElement.setAttribute('data-appearance', appearance);
   }
 
+  /**
+   * Bottom-right appearance/reading switcher:
+   *   READ  [Sans | Serif]   THEME  [Light | Dark]
+   * Styled by the .proof-switcher rules in index.html.
+   */
   private render(): void {
-    const toolbar = document.getElementById('toolbar');
-    if (!toolbar) return;
+    if (document.querySelector('.proof-switcher')) return;
 
-    const themeContainer = document.createElement('div');
-    themeContainer.className = 'theme-picker';
-    themeContainer.innerHTML = `
-      <label for="theme-select">Theme:</label>
-      <select id="theme-select">
-        <option value="default" ${this.currentTheme === 'default' ? 'selected' : ''}>Default</option>
-        <option value="whitey" ${this.currentTheme === 'whitey' ? 'selected' : ''}>Whitey</option>
-      </select>
+    const switcher = document.createElement('div');
+    switcher.className = 'proof-switcher';
+    switcher.innerHTML = `
+      <span class="proof-switcher-lab">Read</span>
+      <div class="proof-switcher-seg" role="group" aria-label="Reading style">
+        <button type="button" data-set-theme="default" aria-label="Sans-serif reading style">Sans</button>
+        <button type="button" data-set-theme="whitey" aria-label="Serif reading style">Serif</button>
+      </div>
+      <span class="proof-switcher-lab">Theme</span>
+      <div class="proof-switcher-seg" role="group" aria-label="Appearance">
+        <button type="button" data-set-appearance="light" aria-label="Light appearance">Light</button>
+        <button type="button" data-set-appearance="dark" aria-label="Dark appearance">Dark</button>
+      </div>
     `;
 
-    toolbar.appendChild(themeContainer);
-
-    const select = document.getElementById('theme-select') as HTMLSelectElement;
-    select?.addEventListener('change', (e) => {
-      const target = e.target as HTMLSelectElement;
-      this.setTheme(target.value as Theme);
+    switcher.addEventListener('click', (e) => {
+      const button = (e.target as HTMLElement).closest('button');
+      if (!button) return;
+      const theme = button.getAttribute('data-set-theme');
+      const appearance = button.getAttribute('data-set-appearance');
+      if (theme === 'default' || theme === 'whitey') this.setTheme(theme);
+      if (appearance === 'light' || appearance === 'dark') this.setAppearance(appearance);
     });
+
+    document.body.appendChild(switcher);
+    this.updateUI();
   }
 
   private updateUI(): void {
-    const select = document.getElementById('theme-select') as HTMLSelectElement;
-    if (select) {
-      select.value = this.currentTheme;
+    for (const button of document.querySelectorAll<HTMLButtonElement>('.proof-switcher button')) {
+      const theme = button.getAttribute('data-set-theme');
+      const appearance = button.getAttribute('data-set-appearance');
+      const on = theme ? theme === this.currentTheme : appearance === this.currentAppearance;
+      button.classList.toggle('on', on);
+      button.setAttribute('aria-pressed', String(on));
     }
   }
 }
