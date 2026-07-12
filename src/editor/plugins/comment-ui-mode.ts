@@ -42,7 +42,7 @@ function getRuntimeDefaultMode(): CommentUiMode | null {
 }
 
 export function getCommentUiMode(): CommentUiMode {
-  return getQueryMode() ?? getStorageMode() ?? getRuntimeDefaultMode() ?? 'v2';
+  return getQueryMode() ?? getStorageMode() ?? getRuntimeDefaultMode() ?? 'auto';
 }
 
 export function shouldUseCommentUiV2(): boolean {

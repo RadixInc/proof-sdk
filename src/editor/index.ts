@@ -143,6 +143,7 @@ import {
 } from './batch-executor';
 import { syncAgentSessions } from '../analytics/agent-sessions';
 import { initThemePicker, getThemePicker } from '../ui/theme-picker';
+import { initProvenanceLegend } from '../ui/provenance-legend';
 import { fileClient } from '../bridge/file-client';
 import { shareClient, type CollabSessionInfo, type SharePendingEvent } from '../bridge/share-client';
 import { collabClient, type CollabSyncStatus } from '../bridge/collab-client';
@@ -1268,9 +1269,10 @@ class ProofEditorImpl implements ProofEditor {
     // Initialize agent integration for @proof mentions
     this.initAgentIntegration();
 
-    // Theme picker only applies to regular editor mode.
+    // Theme picker and provenance legend only apply to regular editor mode.
     if (!this.isShareMode) {
       initThemePicker();
+      initProvenanceLegend();
     }
 
     // If in CLI mode, load the file from the API
