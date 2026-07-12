@@ -2750,7 +2750,7 @@ class ProofEditorImpl implements ProofEditor {
             ? context.doc.marks as Record<string, StoredMark>
             : null;
           if (!serverMarks) return;
-          this.applyAuthoritativeShareMarks(serverMarks);
+          this.applyExternalMarks(serverMarks);
         })
         .catch(() => {
           // best-effort refresh for server-originated mark updates
@@ -4789,12 +4789,23 @@ class ProofEditorImpl implements ProofEditor {
   applyExternalMarks(marks: Record<string, StoredMark>): void {
     if (!this.editor) return;
 
-    this.editor.action((ctx) => {
-      const view = ctx.get(editorViewCtx);
-      // Use applyRemoteMarks to create ProseMirror anchors for new marks
-      // (using the `quote` field) and merge metadata for existing marks.
-      applyRemoteMarks(view, marks, { hydrateAnchors: this.collabCanEdit });
-    });
+    // Reconciling server-confirmed marks into the local doc is not a new local
+    // edit — suppress handleMarksChange so it doesn't push this right back out
+    // (setMarksMetadata/flushShareMarks), which would otherwise generate a new
+    // server event, get picked up by startShareEventPoll, and loop forever.
+    this.applyingCollabRemote = true;
+    this.suppressMarksSync = true;
+    try {
+      this.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        // Use applyRemoteMarks to create ProseMirror anchors for new marks
+        // (using the `quote` field) and merge metadata for existing marks.
+        applyRemoteMarks(view, marks, { hydrateAnchors: this.collabCanEdit });
+      });
+    } finally {
+      this.suppressMarksSync = false;
+      this.applyingCollabRemote = false;
+    }
   }
 
   private applyLatestCollabMarksToEditor(): void {
@@ -4802,14 +4813,7 @@ class ProofEditorImpl implements ProofEditor {
     if (Object.keys(this.lastReceivedServerMarks).length === 0) return;
     if (this.isEditorDocStructurallyEmpty()) return;
 
-    this.applyingCollabRemote = true;
-    this.suppressMarksSync = true;
-    try {
-      this.applyExternalMarks(this.lastReceivedServerMarks);
-    } finally {
-      this.suppressMarksSync = false;
-      this.applyingCollabRemote = false;
-    }
+    this.applyExternalMarks(this.lastReceivedServerMarks);
   }
 
   private resetProjectionPublishState(): void {
@@ -8618,10 +8622,10 @@ class ProofEditorImpl implements ProofEditor {
         if (!serverMarks) return;
         this.lastReceivedServerMarks = { ...serverMarks };
         this.initialMarksSynced = true;
+        this.applyExternalMarks(serverMarks);
         if (this.editor) {
           this.editor.action((innerCtx) => {
             const innerView = innerCtx.get(editorViewCtx);
-            applyRemoteMarks(innerView, serverMarks, { hydrateAnchors: this.collabCanEdit });
             const stats = getAuthorshipStats(innerView);
             this.bridge.authorshipStatsUpdated(stats);
           });
@@ -8754,10 +8758,10 @@ class ProofEditorImpl implements ProofEditor {
         if (!latestServerMarks) return;
         this.lastReceivedServerMarks = { ...latestServerMarks };
         this.initialMarksSynced = true;
+        this.applyExternalMarks(latestServerMarks);
         if (this.editor) {
           this.editor.action((innerCtx) => {
             const innerView = innerCtx.get(editorViewCtx);
-            applyRemoteMarks(innerView, latestServerMarks!, { hydrateAnchors: this.collabCanEdit });
             const stats = getAuthorshipStats(innerView);
             this.bridge.authorshipStatsUpdated(stats);
           });
@@ -8799,12 +8803,7 @@ class ProofEditorImpl implements ProofEditor {
           if (!latestServerMarks) return;
           this.lastReceivedServerMarks = { ...latestServerMarks };
           this.initialMarksSynced = true;
-          if (this.editor) {
-            this.editor.action((innerCtx) => {
-              const innerView = innerCtx.get(editorViewCtx);
-              applyRemoteMarks(innerView, latestServerMarks!, { hydrateAnchors: this.collabCanEdit });
-            });
-          }
+          this.applyExternalMarks(latestServerMarks);
         })().catch((error) => {
           console.error('[markAcceptAll] Failed to persist suggestion acceptance via share mutation:', error);
         });

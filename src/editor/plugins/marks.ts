@@ -196,6 +196,36 @@ export function __resetMarkAnchorHydrationFailures(): void {
   markAnchorHydrationFailures.clear();
 }
 
+// Mirrors the failure-side throttle above. Without this, a mark whose anchor
+// keeps appearing "missing" on every applyRemoteMarks pass (e.g. because a
+// remote sync repeatedly resets it before it durably lands) re-fires a
+// 'success' beacon on every single pass, with no rate limit at all.
+const MARK_ANCHOR_HYDRATION_SUCCESS_REPORT_TTL_MS = 2 * 60 * 1000;
+const markAnchorHydrationSuccessReports = new Map<string, number>();
+
+function pruneMarkAnchorHydrationSuccessReports(now: number = Date.now()): void {
+  for (const [id, lastReportedAt] of markAnchorHydrationSuccessReports.entries()) {
+    if (now - lastReportedAt >= MARK_ANCHOR_HYDRATION_SUCCESS_REPORT_TTL_MS) {
+      markAnchorHydrationSuccessReports.delete(id);
+    }
+  }
+}
+
+function shouldReportMarkAnchorHydrationSuccess(id: string, now: number = Date.now()): boolean {
+  const lastReportedAt = markAnchorHydrationSuccessReports.get(id);
+  if (lastReportedAt === undefined) return true;
+  return now - lastReportedAt >= MARK_ANCHOR_HYDRATION_SUCCESS_REPORT_TTL_MS;
+}
+
+function recordMarkAnchorHydrationSuccessReport(id: string, now: number = Date.now()): void {
+  markAnchorHydrationSuccessReports.set(id, now);
+}
+
+// Test-only visibility into success-report throttling state.
+export function __resetMarkAnchorHydrationSuccessReports(): void {
+  markAnchorHydrationSuccessReports.clear();
+}
+
 export function __getMarkAnchorHydrationFailureCount(): number {
   return markAnchorHydrationFailures.size;
 }
@@ -1674,6 +1704,7 @@ export function applyRemoteMarks(
   const now = Date.now();
   pruneResolvedMarkTombstones(now);
   pruneMarkAnchorHydrationFailures(now);
+  pruneMarkAnchorHydrationSuccessReports(now);
   const allEntries = Object.entries(canonicalMetadata);
   const finalizedSuggestionIds = new Set<string>();
   let authoredHydrationFailures = 0;
@@ -1766,8 +1797,9 @@ export function applyRemoteMarks(
       }
       tr = tr.addMark(range.from, range.to, markType.create(attrs));
       clearMarkAnchorHydrationFailure(id);
-      if (shouldReportMarkAnchorResolution(stored.kind)) {
+      if (shouldReportMarkAnchorResolution(stored.kind) && shouldReportMarkAnchorHydrationSuccess(id, now)) {
         reportMarkAnchorResolution('success');
+        recordMarkAnchorHydrationSuccessReport(id, now);
       }
     }
   }
