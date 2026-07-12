@@ -72,6 +72,7 @@ import {
   __getMarkAnchorHydrationFailure,
   __getMarkAnchorHydrationFailureCount,
   __resetMarkAnchorHydrationFailures,
+  __resetMarkAnchorHydrationSuccessReports,
 } from '../editor/plugins/marks.js';
 import { getTextForRange, resolveQuoteRange } from '../editor/utils/text-range.js';
 import { extractEmbeddedProvenance } from '../formats/provenance-sidecar.js';
@@ -1194,6 +1195,106 @@ test('applyRemoteMarks does not throttle hydration across different docs with sa
   assert(hasInlineAnchor, 'Expected applyRemoteMarks to insert inline anchor mark into second doc');
 
   __resetMarkAnchorHydrationFailures();
+});
+
+test('applyRemoteMarks throttles repeated mark-anchor success beacons when an anchor keeps failing to durably persist', () => {
+  const markId = 'c-remote-repeat-success';
+  const doc = marksSchema.node('doc', null, [
+    marksSchema.node('paragraph', null, marksSchema.text('delta epsilon')),
+  ]);
+
+  const marksStatePlugin = new Plugin({
+    key: marksPluginKey,
+    state: {
+      init: () => ({ metadata: {}, activeMarkId: null }),
+      apply: (tr, value) => {
+        const meta = tr.getMeta(marksPluginKey);
+        if (meta?.type === 'SET_METADATA') {
+          return { ...value, metadata: meta.metadata };
+        }
+        return value;
+      },
+    },
+  });
+
+  let state = EditorState.create({
+    schema: marksSchema,
+    doc,
+    plugins: [marksStatePlugin],
+  });
+
+  const view = {
+    get state() {
+      return state;
+    },
+    // Simulates a remote (Yjs isChangeOrigin) transaction whose doc-changing
+    // steps never durably land — e.g. because the next real remote sync
+    // reverts them — while the metadata write still goes through. Every
+    // applyRemoteMarks pass therefore sees the anchor as still missing.
+    dispatch(tr: any) {
+      const metaOnly = state.tr.setMeta(marksPluginKey, tr.getMeta(marksPluginKey));
+      state = state.apply(metaOnly);
+    },
+  } as any;
+
+  const remoteMetadata = {
+    [markId]: {
+      kind: 'comment' as const,
+      by: 'human:test',
+      text: 'Remote comment',
+      quote: 'delta',
+      threadId: markId,
+      thread: [],
+      replies: [],
+      createdAt: new Date('2026-03-07T00:00:00.000Z').toISOString(),
+      resolved: false,
+    },
+  };
+
+  const beaconCalls: string[] = [];
+  const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'window', {
+    value: { location: { pathname: '/d/test-doc', origin: 'https://docs.example.com' } },
+    configurable: true,
+  });
+  Object.defineProperty(globalThis, 'navigator', {
+    value: {
+      sendBeacon: (_url: string, _blob: unknown) => {
+        beaconCalls.push('beacon');
+        return true;
+      },
+    },
+    configurable: true,
+  });
+
+  try {
+    __resetMarkAnchorHydrationFailures();
+    __resetMarkAnchorHydrationSuccessReports();
+
+    applyRemoteMarks(view, remoteMetadata);
+    applyRemoteMarks(view, remoteMetadata);
+    applyRemoteMarks(view, remoteMetadata);
+
+    assertEqual(
+      beaconCalls.length,
+      1,
+      'Expected repeated success hydration for the same still-missing anchor to be throttled to a single beacon'
+    );
+  } finally {
+    if (originalWindowDescriptor) {
+      Object.defineProperty(globalThis, 'window', originalWindowDescriptor);
+    } else {
+      delete (globalThis as any).window;
+    }
+    if (originalNavigatorDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+    } else {
+      delete (globalThis as any).navigator;
+    }
+    __resetMarkAnchorHydrationFailures();
+    __resetMarkAnchorHydrationSuccessReports();
+  }
 });
 
 test('applyRemoteMarks caps authored anchor hydration failures per pass', () => {
