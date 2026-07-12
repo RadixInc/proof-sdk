@@ -96,15 +96,27 @@ test('storage commentUi overrides runtime config', () => {
   });
 });
 
-test('defaults to v2 mode when no query/storage/runtime override is provided', () => {
+test('defaults to auto mode when no query/storage/runtime override is provided', () => {
   withMockWindow({
     location: { search: '' },
     localStorage: { getItem: (_key: string) => null },
     innerWidth: 1200,
     matchMedia: (_query: string) => ({ matches: false }),
   }, () => {
-    assert(getCommentUiMode() === 'v2', 'Expected v2 mode by default');
-    assert(shouldUseCommentUiV2() === true, 'Default mode should enable V2 UI');
+    assert(getCommentUiMode() === 'auto', 'Expected auto mode by default');
+    assert(shouldUseCommentUiV2() === false, 'Default mode on a wide, fine-pointer viewport should use the anchored popover, not the mobile sheet');
+  });
+});
+
+test('auto mode still enables V2 on a coarse (touch) pointer regardless of width', () => {
+  withMockWindow({
+    location: { search: '' },
+    localStorage: { getItem: (_key: string) => null },
+    innerWidth: 1200,
+    matchMedia: (_query: string) => ({ matches: true }),
+  }, () => {
+    assert(getCommentUiMode() === 'auto', 'Expected auto mode by default');
+    assert(shouldUseCommentUiV2() === true, 'Coarse pointer should enable V2 UI even on a wide viewport');
   });
 });
 
