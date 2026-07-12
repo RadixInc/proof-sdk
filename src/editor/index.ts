@@ -1269,11 +1269,10 @@ class ProofEditorImpl implements ProofEditor {
     // Initialize agent integration for @proof mentions
     this.initAgentIntegration();
 
-    // Theme picker and provenance legend only apply to regular editor mode.
-    if (!this.isShareMode) {
-      initThemePicker();
-      initProvenanceLegend();
-    }
+    // Theme picker and provenance legend apply in both regular and share mode —
+    // share mode is where the suggestion popover and provenance gutter live.
+    initThemePicker();
+    initProvenanceLegend();
 
     // If in CLI mode, load the file from the API
     if (this.isCliMode) {
