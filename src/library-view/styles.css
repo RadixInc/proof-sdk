@@ -1,0 +1,147 @@
+/* ============================================================================
+   PROOF — /library view. Adapted from the Claude Design mock
+   ("Proof Library.html" / library.css) with the fields that have no backend
+   today removed: provenance accent bars, snippet text, comment-count pill,
+   agent badge, collaborator avatar stack, star toggle, and the New Document
+   button. See docs/adr/2026-07-library-view.md.
+   ============================================================================ */
+
+.lib { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ---------------------------- TOP BAR ----------------------------------- */
+.topbar {
+  position: sticky; top: 0; z-index: 900; display: flex; align-items: center; gap: 16px;
+  height: 60px; padding: 0 20px; background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topbar .brand { display: flex; align-items: center; gap: 8px; padding-right: 16px;
+  margin-right: 2px; border-right: 1px solid var(--border); }
+.topbar .logo { width: 24px; height: 24px; border-radius: var(--r-sm); background: var(--btn-bg);
+  color: var(--btn-fg); display: grid; place-items: center; font-weight: 800; font-size: 14px; }
+.topbar .wm { font-weight: 700; font-size: 15px; letter-spacing: -.01em; color: var(--text); }
+.topbar .wm .dim { color: var(--text-faint); font-weight: 600; }
+
+/* search */
+.search { position: relative; flex: 1; max-width: 460px; }
+.search .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--text-faint); width: 17px; height: 17px; pointer-events: none; }
+.search input { width: 100%; height: 38px; padding: 0 14px 0 36px; font-family: var(--ui-font);
+  font-size: 13.5px; color: var(--text); background: var(--surface-2);
+  border: 1px solid transparent; border-radius: var(--r-md); transition: background .15s, border-color .15s, box-shadow .15s; }
+.search input::placeholder { color: var(--text-faint); }
+.search input:hover { background: var(--surface-3); }
+.search input:focus { outline: none; background: var(--surface); border-color: var(--link); box-shadow: var(--ring); }
+.search .kbd { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  font-size: 11px; font-weight: 600; color: var(--text-faint); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-xs); padding: 2px 6px; }
+.search input:focus ~ .kbd { display: none; }
+
+.topbar .spacer { flex: 1; }
+.topbar .me { width: 32px; height: 32px; border-radius: var(--r-pill); display: grid; place-items: center;
+  font-size: 12px; font-weight: 700; color: #fff; border: 2px solid var(--surface); box-shadow: var(--sh-sm); flex: none; }
+
+/* ---------------------------- BODY GRID --------------------------------- */
+.body { flex: 1; display: grid; grid-template-columns: 244px 1fr; }
+
+/* sidebar */
+.sidebar { border-right: 1px solid var(--border); padding: 22px 14px; position: sticky;
+  top: 60px; align-self: start; height: calc(100vh - 60px); overflow: auto; }
+.side-label { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-faint); padding: 0 10px; margin: 4px 0 8px; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.navitem { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px;
+  border-radius: var(--r-sm); cursor: pointer; color: var(--text-2); font-size: 13.5px; font-weight: 500;
+  border: 1px solid transparent; transition: background .13s, color .13s; text-align: left; background: none; width: 100%; }
+.navitem .icon { width: 17px; height: 17px; color: var(--text-muted); flex: none; }
+.navitem:hover { background: var(--surface-2); color: var(--text); }
+.navitem.on { background: var(--surface-2); color: var(--text); font-weight: 600; border-color: var(--border); }
+.navitem.on .icon { color: var(--text); }
+.navitem .n { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--text-faint);
+  font-variant-numeric: tabular-nums; }
+.navitem.on .n { color: var(--text-muted); }
+
+/* ------------------------------ MAIN ------------------------------------ */
+.main { padding: 28px 36px 120px; min-width: 0; }
+.main-head { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
+.main-head h1 { font-size: 24px; font-weight: 700; letter-spacing: -.02em; color: var(--text); margin: 0; }
+.main-head .sub { font-size: 13.5px; color: var(--text-muted); padding-bottom: 2px; }
+.main-head .spacer { flex: 1; }
+
+.sortrow { display: flex; align-items: center; gap: 8px; }
+.sortrow .lab { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-faint); }
+
+/* segmented control (shared by sort + the bottom-right switcher) */
+.seg { display: inline-flex; align-items: center; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 2px; gap: 2px; }
+.seg button { border: 0; background: none; height: 26px; padding: 0 10px; border-radius: var(--r-sm);
+  font-family: var(--ui-font); font-size: 12px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; gap: 5px; transition: background .13s, color .13s; }
+.seg button:hover { color: var(--text); }
+.seg button.on { background: var(--surface); color: var(--text); box-shadow: var(--sh-sm); }
+
+/* ----------------------------- GRID ------------------------------------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 16px; }
+.card { position: relative; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg); overflow: hidden; cursor: pointer; text-align: left;
+  transition: border-color .15s, box-shadow .15s, transform .15s; display: flex; flex-direction: column; }
+.card:hover { border-color: var(--border-strong); box-shadow: var(--sh-md); transform: translateY(-2px); }
+.card.gone { cursor: default; opacity: .55; }
+.card.gone:hover { border-color: var(--border); box-shadow: none; transform: none; }
+.card .cbody { padding: 16px 16px 14px; flex: 1; }
+.card .ctitle { font-size: 15px; font-weight: 650; line-height: 1.32; color: var(--text);
+  letter-spacing: -.01em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; }
+.card .cmeta-line { display: flex; align-items: center; gap: 8px; padding: 0 16px 14px; }
+
+/* ----------------------------- LIST ------------------------------------- */
+.list { border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); }
+.row { position: relative; display: flex; align-items: center; gap: 14px; padding: 13px 16px;
+  cursor: pointer; border-bottom: 1px solid var(--border); transition: background .12s; width: 100%; text-align: left; background: none; }
+.row:last-child { border-bottom: 0; }
+.row:hover { background: var(--surface-2); }
+.row.gone { cursor: default; opacity: .55; }
+.row.gone:hover { background: none; }
+.row .rmain { min-width: 0; flex: 1; }
+.row .rtitle { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -.005em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .rmeta { display: flex; align-items: center; gap: 14px; flex: none; }
+
+/* ------------------------ SHARED CELL PIECES ---------------------------- */
+.role { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  padding: 3px 7px; border-radius: var(--r-xs); flex: none; }
+.role.owner { color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); }
+.role.editor { color: var(--link); background: color-mix(in srgb, var(--link) 12%, transparent); }
+.role.commenter { color: var(--text-muted); background: var(--surface-2); }
+.role.deleted, .role.paused, .role.revoked { color: var(--text-faint); background: var(--surface-2); }
+
+.time { font-size: 12px; color: var(--text-muted); white-space: nowrap; flex: none;
+  font-variant-numeric: tabular-nums; }
+
+/* ------------------------------ EMPTY ----------------------------------- */
+.empty { text-align: center; padding: 80px 20px; color: var(--text-muted); }
+.empty .eico { width: 44px; height: 44px; border-radius: var(--r-md); background: var(--surface-2);
+  display: grid; place-items: center; margin: 0 auto 16px; color: var(--text-faint); }
+.empty .eico .icon { width: 22px; height: 22px; }
+.empty h3 { font-size: 16px; font-weight: 650; color: var(--text); margin: 0 0 6px; }
+.empty p { font-size: 13.5px; margin: 0; }
+
+/* ------------------------------ ICONS ------------------------------------ */
+.icon { width: 20px; height: 20px; }
+
+/* ------------------------- SWITCHER (bottom-right) ----------------------- */
+.switcher { position: fixed; right: 20px; bottom: 20px; z-index: 900; display: flex; align-items: center;
+  gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: 8px 12px; box-shadow: var(--sh-md); }
+.switcher .lab { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-faint); }
+.switcher .seg button .icon { width: 15px; height: 15px; }
+
+@media (max-width: 860px) {
+  .body { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .main { padding: 22px 18px 120px; }
+  .search .kbd { display: none; }
+  .topbar .wm { display: none; }
+  .switcher { left: 12px; right: 12px; justify-content: center; flex-wrap: wrap; }
+}

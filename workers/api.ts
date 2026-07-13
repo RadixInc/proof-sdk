@@ -19,7 +19,7 @@ import { resolveCollabSigningSecret, signCollabToken } from './collab-token';
 import type { DocumentDO } from './document-do';
 import { buildProofSdkAgentDescriptor, buildProofSdkLinks } from './sdk-links';
 import { renderSnapshotHtml, snapshotObjectKey, snapshotPublicPath } from './snapshot';
-import { queryLibrary, recordVisit, renderLibraryHtml } from './library';
+import { queryLibrary, recordVisit } from './library';
 import { getBugReportSpec, handleBugReportSubmit } from './bug-reports';
 import type { BugReportEnv } from './bug-reports';
 import {
@@ -38,6 +38,8 @@ import type { ResolvedRole, ShareRole } from './util';
 export interface ApiEnv extends BugReportEnv {
   DOCUMENT_DO: DurableObjectNamespace<DocumentDO>;
   DB: D1Database;
+  /** Static assets binding — used to serve the /library SPA shell. */
+  ASSETS: Fetcher;
   PROOF_PUBLIC_BASE_URL?: string;
   PROOF_TRUST_PROXY_HEADERS?: string;
   PROOF_LEGACY_CREATE_MODE?: string;
@@ -1180,16 +1182,15 @@ export async function handleApiRequest(
         403,
       );
     }
-    const rows = await queryLibrary(env.DB, _identity.email);
     if (path === '/api/library') {
+      const rows = await queryLibrary(env.DB, _identity.email);
       return json({ success: true, user: _identity.email, documents: rows });
     }
-    return new Response(renderLibraryHtml(_identity.email, rows), {
-      headers: {
-        'content-type': 'text/html; charset=utf-8',
-        'cache-control': 'no-store',
-      },
-    });
+    // /library: serve the built SPA shell (src/library.html); it fetches
+    // /api/library itself once mounted. Fetching the literal asset path
+    // keeps Vite's own <head> (favicons, script/link tags) as the single
+    // source of truth instead of a hand-duplicated shell here.
+    return env.ASSETS.fetch(new Request(new URL('/library.html', request.url), request));
   }
 
   // Telemetry beacons from the web editor (mark-anchor, collab-reconnect).

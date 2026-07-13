@@ -50,6 +50,10 @@ export default defineConfig({
         target: 'http://localhost:8787',
         changeOrigin: true,
       },
+      '/library': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+      },
       '/new': {
         target: 'http://localhost:8787',
         changeOrigin: true,
