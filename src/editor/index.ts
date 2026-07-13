@@ -5495,8 +5495,13 @@ class ProofEditorImpl implements ProofEditor {
     // Only CLI mode and share mode load content asynchronously after mount —
     // in every other case (including the bare local/scratch editor) the live
     // doc IS the final state from the moment the editor exists, even if
-    // empty, so there's nothing to actually wait for.
-    const awaitingInitialLoad = (this.isCliMode || this.isShareMode) && !this.hasTrackedDocumentOpened;
+    // empty, so there's nothing to actually wait for. Share mode with live
+    // collab never calls loadDocument (content arrives via the Yjs binding
+    // instead), so hasTrackedDocumentOpened would never flip and this would
+    // wait forever — gate on hasCompletedInitialCollabHydration in that case.
+    const awaitingInitialLoad = this.isShareMode
+      ? (this.collabEnabled ? !this.hasCompletedInitialCollabHydration : !this.hasTrackedDocumentOpened)
+      : (this.isCliMode && !this.hasTrackedDocumentOpened);
     if (awaitingInitialLoad) {
       textarea.value = 'Loading…';
       return;
