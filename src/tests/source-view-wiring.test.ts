@@ -45,10 +45,16 @@ assert(
 
 assert(
   source.includes("textarea.value = 'Loading…';")
-    && source.includes('const awaitingInitialLoad = (this.isCliMode || this.isShareMode) && !this.hasTrackedDocumentOpened;'),
+    && source.includes(
+      'const awaitingInitialLoad = this.isShareMode\n' +
+      '      ? (this.collabEnabled ? !this.hasCompletedInitialCollabHydration : !this.hasTrackedDocumentOpened)\n' +
+      '      : (this.isCliMode && !this.hasTrackedDocumentOpened);'
+    ),
   'Expected refreshSourcePanel to only show the loading placeholder while CLI/share mode has an async load in flight — ' +
     'gating on hasTrackedDocumentOpened alone left the bare local/scratch editor (no CLI file, no share slug, which never ' +
-    'calls loadDocument at all) stuck on "Loading…" forever, even though its empty live doc IS the final state',
+    'calls loadDocument at all) stuck on "Loading…" forever, even though its empty live doc IS the final state. Share mode ' +
+    'with live collab enabled never calls loadDocument either (content hydrates via the Yjs binding in kickCollabHydration, ' +
+    'not loadDocument), so it must gate on hasCompletedInitialCollabHydration instead, or it is stuck on "Loading…" forever too.',
 );
 
 assert(
