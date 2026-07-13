@@ -554,6 +554,10 @@ function handleLinkClick(view: EditorView, event: MouseEvent): boolean {
   return true;
 }
 
+export function dismissLinkHoverCard(view: EditorView): void {
+  hoverControllers.get(view)?.dismissCard();
+}
+
 export const markdownLinkClickPlugin = $prose(() => {
   return new Plugin({
     key: markdownLinkClickKey,

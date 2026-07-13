@@ -248,19 +248,21 @@
       transition: background 0.2s ease;
     }
 
-    #editor {
+    #editor, .proof-source {
       padding: 72px 40px 160px;
       padding-left: calc(var(--provenance-bar-width) + 20px);
       min-height: 100vh;
       outline: none;
     }
 
-    :root[data-theme="whitey"] #editor {
+    :root[data-theme="whitey"] #editor,
+    :root[data-theme="whitey"] .proof-source {
       padding: 96px 40px 160px;
     }
 
     /* Share mode: comfortable reading/writing width */
-    body[data-share-mode="true"] #editor {
+    body[data-share-mode="true"] #editor,
+    body[data-share-mode="true"] .proof-source {
       padding: 96px 48px 160px;
       padding-left: calc(var(--provenance-bar-width) + 42px);
     }
@@ -1191,6 +1193,56 @@
     :root[data-theme="whitey"] .milkdown blockquote {
       border-left-color: var(--human);
     }
+
+    /* ============ SOURCE / RENDERED VIEW ============ */
+    .proof-source {
+      display: none;
+      color: var(--text);
+      text-align: left;
+      background: none;
+      border: none;
+    }
+
+    .proof-source-input {
+      display: block;
+      width: 100%;
+      min-height: calc(100vh - 240px);
+      font-family: var(--mono-font);
+      font-size: 13.5px;
+      line-height: 1.75;
+      word-break: break-word;
+      color: inherit;
+      background: none;
+      border: none;
+      outline: none;
+      resize: vertical;
+      padding: 0;
+    }
+
+    .proof-source-input[readonly] {
+      cursor: default;
+    }
+
+    .proof-source-error {
+      display: none;
+      margin-top: 12px;
+      padding: 8px 12px;
+      border-radius: var(--r-xs);
+      background: var(--warn, #d97706);
+      color: white;
+      font-family: var(--ui-font);
+      font-size: 12.5px;
+      font-weight: 500;
+    }
+
+    .proof-source-error.visible {
+      display: block;
+    }
+
+    :root[data-view="source"] #editor { display: none; }
+    :root[data-view="source"] .proof-source { display: block; }
+    :root[data-view="source"] #provenance-gutter { display: none; }
+    :root[data-view="source"] .proof-legend { display: none; }
 
     /* ============ APPEARANCE / READING SWITCHER (bottom-right) ============ */
     .proof-switcher {

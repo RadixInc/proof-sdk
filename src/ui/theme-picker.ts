@@ -1,32 +1,40 @@
 export type Theme = 'default' | 'whitey';
 export type Appearance = 'light' | 'dark';
+export type DocView = 'rendered' | 'source';
 
 export interface ThemePickerOptions {
   defaultTheme?: Theme;
   defaultAppearance?: Appearance;
+  defaultView?: DocView;
   container?: HTMLElement;
   onChange?: (theme: Theme) => void;
   onAppearanceChange?: (appearance: Appearance) => void;
+  onViewChange?: (view: DocView) => void;
 }
 
 export class ThemePicker {
   private currentTheme: Theme;
   private currentAppearance: Appearance;
+  private currentView: DocView;
   private container: HTMLElement | null;
   private onChange?: (theme: Theme) => void;
   private onAppearanceChange?: (appearance: Appearance) => void;
+  private onViewChange?: (view: DocView) => void;
 
   constructor(options: ThemePickerOptions = {}) {
     this.currentTheme = options.defaultTheme || this.loadSavedTheme();
     this.currentAppearance = options.defaultAppearance || this.loadSavedAppearance();
+    this.currentView = options.defaultView || this.loadSavedView();
     this.container = options.container || null;
     this.onChange = options.onChange;
     this.onAppearanceChange = options.onAppearanceChange;
+    this.onViewChange = options.onViewChange;
   }
 
   init(): void {
     this.applyTheme(this.currentTheme);
     this.applyAppearance(this.currentAppearance);
+    this.applyView(this.currentView);
     this.render();
   }
 
@@ -54,6 +62,18 @@ export class ThemePicker {
     localStorage.setItem('proof-appearance', appearance);
   }
 
+  private loadSavedView(): DocView {
+    const saved = localStorage.getItem('proof-view');
+    if (saved === 'source' || saved === 'rendered') {
+      return saved;
+    }
+    return 'rendered';
+  }
+
+  private saveView(view: DocView): void {
+    localStorage.setItem('proof-view', view);
+  }
+
   setTheme(theme: Theme): void {
     this.currentTheme = theme;
     this.applyTheme(theme);
@@ -78,6 +98,18 @@ export class ThemePicker {
     return this.currentAppearance;
   }
 
+  setView(view: DocView): void {
+    this.currentView = view;
+    this.applyView(view);
+    this.saveView(view);
+    this.updateUI();
+    this.onViewChange?.(view);
+  }
+
+  getView(): DocView {
+    return this.currentView;
+  }
+
   private applyTheme(theme: Theme): void {
     document.documentElement.setAttribute('data-theme', theme);
   }
@@ -86,9 +118,13 @@ export class ThemePicker {
     document.documentElement.setAttribute('data-appearance', appearance);
   }
 
+  private applyView(view: DocView): void {
+    document.documentElement.setAttribute('data-view', view);
+  }
+
   /**
    * Bottom-right appearance/reading switcher:
-   *   READ  [Sans | Serif]   THEME  [Light | Dark]
+   *   VIEW  [Source | Rendered]   READ  [Sans | Serif]   THEME  [Light | Dark]
    * Styled by the .proof-switcher rules in index.html.
    */
   private render(): void {
@@ -97,6 +133,11 @@ export class ThemePicker {
     const switcher = document.createElement('div');
     switcher.className = 'proof-switcher';
     switcher.innerHTML = `
+      <span class="proof-switcher-lab">View</span>
+      <div class="proof-switcher-seg" role="group" aria-label="Document view">
+        <button type="button" data-set-view="source" aria-label="Raw markdown source">Source</button>
+        <button type="button" data-set-view="rendered" aria-label="Rendered document">Rendered</button>
+      </div>
       <span class="proof-switcher-lab">Read</span>
       <div class="proof-switcher-seg" role="group" aria-label="Reading style">
         <button type="button" data-set-theme="default" aria-label="Sans-serif reading style">Sans</button>
@@ -114,8 +155,10 @@ export class ThemePicker {
       if (!button) return;
       const theme = button.getAttribute('data-set-theme');
       const appearance = button.getAttribute('data-set-appearance');
+      const view = button.getAttribute('data-set-view');
       if (theme === 'default' || theme === 'whitey') this.setTheme(theme);
       if (appearance === 'light' || appearance === 'dark') this.setAppearance(appearance);
+      if (view === 'source' || view === 'rendered') this.setView(view);
     });
 
     document.body.appendChild(switcher);
@@ -126,7 +169,12 @@ export class ThemePicker {
     for (const button of document.querySelectorAll<HTMLButtonElement>('.proof-switcher button')) {
       const theme = button.getAttribute('data-set-theme');
       const appearance = button.getAttribute('data-set-appearance');
-      const on = theme ? theme === this.currentTheme : appearance === this.currentAppearance;
+      const view = button.getAttribute('data-set-view');
+      const on = theme
+        ? theme === this.currentTheme
+        : appearance
+          ? appearance === this.currentAppearance
+          : view === this.currentView;
       button.classList.toggle('on', on);
       button.setAttribute('aria-pressed', String(on));
     }
