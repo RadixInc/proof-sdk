@@ -48,12 +48,14 @@ import {
   authorizeDocumentOp,
   authorizePresence,
   buildImplicitLegacyTarget,
+  parseAnchorTarget,
   parseDocumentOp,
   parseOpAddressing,
   resolveOpAnchor,
   stripAuthoredMarks,
   validateRewritePayload,
 } from './ops';
+import type { AnchorTarget } from './anchor-resolver';
 import {
   deriveAgentNameFromId,
   normalizeAgentScopedId,
@@ -1152,6 +1154,7 @@ export class DocumentDO extends YServer {
   private resolveStoredMarkAnchor(
     mark: OpStoredMark,
     markdown: string,
+    targetOverride?: AnchorTarget,
   ):
     | { ok: true; selection: { sourceStart: number; sourceEnd: number } }
     | { ok: false; status: number; body: Record<string, unknown> } {
@@ -1173,6 +1176,15 @@ export class DocumentDO extends YServer {
       };
     }
     const message = 'Suggestion anchor could not be resolved in current markdown';
+    // A caller-supplied target (e.g. after a 409 ANCHOR_AMBIGUOUS, retried
+    // with an explicit occurrence/context) is a deliberate disambiguation —
+    // try it alone and report its own failure rather than folding it into
+    // the graduated fallback below.
+    if (targetOverride) {
+      const resolved = resolveOpAnchor(markdown, targetOverride, message);
+      if (resolved.ok) return { ok: true, selection: resolved.anchor.selection };
+      return resolved;
+    }
     // Graduated fallback: the stabilized context captured at add time is a
     // disambiguator, not a veto. Any accepted edit near the anchor (e.g.
     // finalizing a neighboring suggestion) invalidates the stored
@@ -1412,11 +1424,20 @@ export class DocumentDO extends YServer {
         if (!markId) {
           return { status: 400, body: { success: false, error: 'Missing markId' } };
         }
+        let targetOverride: AnchorTarget | undefined;
+        if (payload.target !== undefined) {
+          const parsedTarget = parseAnchorTarget(payload.target);
+          if (!parsedTarget.ok) {
+            return { status: 400, body: { success: false, error: parsedTarget.error } };
+          }
+          targetOverride = parsedTarget.target;
+        }
         return this.finalizeSuggestion(
           markId,
           op === 'suggestion.accept' ? 'accepted' : 'rejected',
           by,
           operator,
+          targetOverride,
         );
       }
 
@@ -1529,6 +1550,7 @@ export class DocumentDO extends YServer {
     status: 'accepted' | 'rejected',
     by: string,
     operator: string | null = null,
+    targetOverride?: AnchorTarget,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
     const map = this.document.getMap('marks');
     const existing = map.get(markId) as OpStoredMark | undefined;
@@ -1564,7 +1586,7 @@ export class DocumentDO extends YServer {
       const markdown = String(doc.markdown);
       let nextMarkdown = markdown;
       if (status === 'accepted') {
-        const resolved = this.resolveStoredMarkAnchor(existing, markdown);
+        const resolved = this.resolveStoredMarkAnchor(existing, markdown, targetOverride);
         if (!resolved.ok) return { status: resolved.status, body: resolved.body };
         nextMarkdown = buildAcceptedSuggestionMarkdownFromSelection(
           markdown,

@@ -167,6 +167,75 @@ async function main() {
     ok('stale-context accept applied the content', staleAcceptedMarkdown.includes('(eventually)'));
     ok('stale-context accept removed the anchor span', !staleAcceptedMarkdown.includes(staleContextId));
 
+    // Ambiguous anchor: a suggestion added against a single occurrence can
+    // become ambiguous by accept time if the surrounding text is later
+    // duplicated — accept must fail closed (never guess), and a retry
+    // carrying an explicit `target` override must resolve it.
+    const ambiguousDoc = await fetch(`${BASE}/documents`, {
+      method: 'POST',
+      headers: JSON_HDRS,
+      body: JSON.stringify({
+        markdown: '# Dup\n\nAlpha bravo charlie.\n\nDelta echo foxtrot.',
+        title: 'Dup',
+      }),
+    });
+    const ambiguous = (await ambiguousDoc.json()) as Record<string, any>;
+    ok('setup: ambiguous-doc created', ambiguousDoc.status === 200 && !!ambiguous.slug);
+    const ambiguousSlug = ambiguous.slug as string;
+    const ambiguousToken = ambiguous.accessToken as string;
+
+    const ambiguousSuggestion = await postOp(ambiguousSlug, ambiguousToken, {
+      type: 'suggestion.add',
+      payload: { kind: 'replace', by: 'ai:reviewer', quote: 'Alpha bravo charlie.', content: 'Zulu.' },
+    });
+    ok('setup: ambiguous suggestion added', ambiguousSuggestion.status === 200, ambiguousSuggestion.body);
+    const ambiguousMarkId = ambiguousSuggestion.body.markId as string;
+
+    // Duplicate the whole body so the stored anchor's text and its
+    // stabilized context both now match a second location.
+    const duplicated = await postOp(ambiguousSlug, ambiguousToken, {
+      type: 'suggestion.add',
+      payload: {
+        kind: 'insert',
+        by: 'ai:reviewer',
+        quote: 'Delta echo foxtrot.',
+        content: '\n\nAlpha bravo charlie.\n\nDelta echo foxtrot.',
+        status: 'accepted',
+      },
+    });
+    ok('setup: duplicating insert accepted', duplicated.status === 200, duplicated.body);
+
+    const ambiguousAccept = await postOp(ambiguousSlug, ambiguousToken, {
+      type: 'suggestion.accept',
+      payload: { markId: ambiguousMarkId, by: 'human:editor@example.com' },
+    });
+    ok(
+      'accept fails closed with ANCHOR_AMBIGUOUS on a duplicated anchor',
+      ambiguousAccept.status === 409 && ambiguousAccept.body.code === 'ANCHOR_AMBIGUOUS',
+      ambiguousAccept.body,
+    );
+
+    const disambiguatedAccept = await postOp(ambiguousSlug, ambiguousToken, {
+      type: 'suggestion.accept',
+      payload: {
+        markId: ambiguousMarkId,
+        by: 'human:editor@example.com',
+        target: { anchor: 'Alpha bravo charlie.', mode: 'normalized', occurrence: 'first' },
+      },
+    });
+    ok(
+      'accept with target override resolves the ambiguity',
+      disambiguatedAccept.status === 200 && disambiguatedAccept.body.marks?.[ambiguousMarkId]?.status === 'accepted',
+      disambiguatedAccept.body,
+    );
+    const disambiguatedMarkdown = String(disambiguatedAccept.body.markdown ?? '');
+    ok('disambiguated accept applied the content once', disambiguatedMarkdown.includes('Zulu.'));
+    ok(
+      'disambiguated accept left the second occurrence untouched',
+      disambiguatedMarkdown.includes('Alpha bravo charlie.'),
+      disambiguatedMarkdown,
+    );
+
     // Resurrection attempt: a stale client deletes the finalized map entry
     // and re-adds it as pending — bypassing the value-overwrite guard.
     const sessRes = await fetch(`${BASE}/documents/${slug}/collab-session`, {

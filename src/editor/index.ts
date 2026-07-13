@@ -150,6 +150,7 @@ import { initThemePicker, getThemePicker, type DocView } from '../ui/theme-picke
 import { initProvenanceLegend } from '../ui/provenance-legend';
 import { fileClient } from '../bridge/file-client';
 import { shareClient, type CollabSessionInfo, type SharePendingEvent } from '../bridge/share-client';
+import { getShareMarkMutationFailureMessage, recoverShareMarksAfterMutationFailure } from './share-mark-mutation';
 import { collabClient, type CollabSyncStatus } from '../bridge/collab-client';
 import { shouldDeferShareMarksRefresh } from './share-marks-refresh';
 import { collabCursorBuilder, collabSelectionBuilder } from './plugins/collab-cursors';
@@ -8797,6 +8798,33 @@ class ProofEditorImpl implements ProofEditor {
     return success;
   }
 
+  /** Apply an authoritative post-accept server marks snapshot and refresh authorship stats. */
+  private applyAcceptedServerMarksAndRefreshStats(serverMarks: Record<string, StoredMark>): void {
+    this.lastReceivedServerMarks = { ...serverMarks };
+    this.initialMarksSynced = true;
+    this.applyExternalMarks(serverMarks);
+    if (this.editor) {
+      this.editor.action((innerCtx) => {
+        const innerView = innerCtx.get(editorViewCtx);
+        const stats = getAuthorshipStats(innerView);
+        this.bridge.authorshipStatsUpdated(stats);
+      });
+    }
+  }
+
+  /** Merge an authoritative server marks snapshot into the current view's pending metadata. */
+  private mergeServerMarksIntoPendingView(serverMarks: Record<string, StoredMark>): void {
+    this.lastReceivedServerMarks = { ...serverMarks };
+    this.initialMarksSynced = true;
+    if (this.editor) {
+      this.editor.action((innerCtx) => {
+        const innerView = innerCtx.get(editorViewCtx);
+        const mergedMetadata = mergePendingServerMarks(getMarkMetadataWithQuotes(innerView.state), serverMarks);
+        setMarkMetadata(innerView, mergedMetadata);
+      });
+    }
+  }
+
   /**
    * Accept a suggestion and apply the change
    */
@@ -8819,24 +8847,34 @@ class ProofEditorImpl implements ProofEditor {
 
       const actor = getCurrentActor();
       void shareClient.acceptSuggestion(markId, actor).then((result) => {
-        if (!result || 'error' in result || result.success !== true) return;
-        const serverMarks = (result.marks && typeof result.marks === 'object' && !Array.isArray(result.marks))
-          ? result.marks as Record<string, StoredMark>
-          : null;
-        if (!serverMarks) return;
-        this.lastReceivedServerMarks = { ...serverMarks };
-        this.initialMarksSynced = true;
-        this.applyExternalMarks(serverMarks);
-        if (this.editor) {
-          this.editor.action((innerCtx) => {
-            const innerView = innerCtx.get(editorViewCtx);
-            const stats = getAuthorshipStats(innerView);
-            this.bridge.authorshipStatsUpdated(stats);
-          });
+        if (result && !('error' in result) && result.success === true) {
+          const serverMarks = (result.marks && typeof result.marks === 'object' && !Array.isArray(result.marks))
+            ? result.marks as Record<string, StoredMark>
+            : null;
+          if (serverMarks) this.applyAcceptedServerMarksAndRefreshStats(serverMarks);
+          captureEvent('suggestion_accepted', { count: 1 });
+          return;
         }
-        captureEvent('suggestion_accepted', { count: 1 });
+        // The server rejected the accept (e.g. 409 ANCHOR_AMBIGUOUS) — the
+        // suggestion was never actually finalized. Surface why, and reapply
+        // authoritative marks so the still-pending suggestion doesn't sit
+        // silently mismatched from what the editor already showed.
+        void recoverShareMarksAfterMutationFailure({
+          failure: result,
+          fallbackMessage: 'Unable to accept suggestion.',
+          fetchOpenContext: () => shareClient.fetchOpenContext(),
+          showErrorBanner: (message) => this.showErrorBanner(message),
+          applyServerMarks: (marks) => this.applyAcceptedServerMarksAndRefreshStats(marks),
+        });
       }).catch((error) => {
         console.error('[markAccept] Failed to persist suggestion acceptance via share mutation:', error);
+        void recoverShareMarksAfterMutationFailure({
+          failure: error,
+          fallbackMessage: 'Unable to accept suggestion.',
+          fetchOpenContext: () => shareClient.fetchOpenContext(),
+          showErrorBanner: (message) => this.showErrorBanner(message),
+          applyServerMarks: (marks) => this.applyAcceptedServerMarksAndRefreshStats(marks),
+        });
       });
       return true;
     }
@@ -8903,22 +8941,29 @@ class ProofEditorImpl implements ProofEditor {
 
         const actor = getCurrentActor();
         void shareClient.rejectSuggestion(markId, actor).then((result) => {
-          if (!result || 'error' in result || result.success !== true) return;
-          const serverMarks = (result.marks && typeof result.marks === 'object' && !Array.isArray(result.marks))
-            ? result.marks as Record<string, StoredMark>
-            : null;
-          if (!serverMarks) return;
-          this.lastReceivedServerMarks = { ...serverMarks };
-          this.initialMarksSynced = true;
-          if (this.editor) {
-            this.editor.action((innerCtx) => {
-              const innerView = innerCtx.get(editorViewCtx);
-              const mergedMetadata = mergePendingServerMarks(getMarkMetadataWithQuotes(innerView.state), serverMarks);
-              setMarkMetadata(innerView, mergedMetadata);
-            });
+          if (result && !('error' in result) && result.success === true) {
+            const serverMarks = (result.marks && typeof result.marks === 'object' && !Array.isArray(result.marks))
+              ? result.marks as Record<string, StoredMark>
+              : null;
+            if (serverMarks) this.mergeServerMarksIntoPendingView(serverMarks);
+            return;
           }
+          void recoverShareMarksAfterMutationFailure({
+            failure: result,
+            fallbackMessage: 'Unable to reject suggestion.',
+            fetchOpenContext: () => shareClient.fetchOpenContext(),
+            showErrorBanner: (message) => this.showErrorBanner(message),
+            applyServerMarks: (marks) => this.mergeServerMarksIntoPendingView(marks),
+          });
         }).catch((error) => {
           console.error('[markReject] Failed to persist suggestion rejection via share mutation:', error);
+          void recoverShareMarksAfterMutationFailure({
+            failure: error,
+            fallbackMessage: 'Unable to reject suggestion.',
+            fetchOpenContext: () => shareClient.fetchOpenContext(),
+            showErrorBanner: (message) => this.showErrorBanner(message),
+            applyServerMarks: (marks) => this.mergeServerMarksIntoPendingView(marks),
+          });
         });
       }
       if (success) {
@@ -8949,9 +8994,13 @@ class ProofEditorImpl implements ProofEditor {
       void (async () => {
         let latestServerMarks: Record<string, StoredMark> | null = null;
         let acceptedCount = 0;
+        let lastFailure: unknown = null;
         for (const suggestionId of acceptedIds) {
           const result = await shareClient.acceptSuggestion(suggestionId, actor);
-          if (!result || 'error' in result || result.success !== true) continue;
+          if (!result || 'error' in result || result.success !== true) {
+            lastFailure = result;
+            continue;
+          }
           const serverMarks = (result.marks && typeof result.marks === 'object' && !Array.isArray(result.marks))
             ? result.marks as Record<string, StoredMark>
             : null;
@@ -8959,22 +9008,39 @@ class ProofEditorImpl implements ProofEditor {
           latestServerMarks = serverMarks;
           acceptedCount += 1;
         }
-        if (!latestServerMarks) return;
-        this.lastReceivedServerMarks = { ...latestServerMarks };
-        this.initialMarksSynced = true;
-        this.applyExternalMarks(latestServerMarks);
-        if (this.editor) {
-          this.editor.action((innerCtx) => {
-            const innerView = innerCtx.get(editorViewCtx);
-            const stats = getAuthorshipStats(innerView);
-            this.bridge.authorshipStatsUpdated(stats);
-          });
+        const failedCount = acceptedIds.length - acceptedCount;
+        if (latestServerMarks) this.applyAcceptedServerMarksAndRefreshStats(latestServerMarks);
+        if (failedCount > 0) {
+          if (latestServerMarks) {
+            // At least one accept succeeded, so latestServerMarks is
+            // already the authoritative snapshot for every mark — no
+            // refetch needed, just tell the user some didn't go through.
+            this.showErrorBanner(getShareMarkMutationFailureMessage(
+              lastFailure,
+              `${failedCount} of ${acceptedIds.length} suggestions could not be accepted.`,
+            ));
+          } else {
+            void recoverShareMarksAfterMutationFailure({
+              failure: lastFailure,
+              fallbackMessage: 'Unable to accept suggestions.',
+              fetchOpenContext: () => shareClient.fetchOpenContext(),
+              showErrorBanner: (message) => this.showErrorBanner(message),
+              applyServerMarks: (marks) => this.applyAcceptedServerMarksAndRefreshStats(marks),
+            });
+          }
         }
         if (acceptedCount > 0) {
           captureEvent('suggestion_accepted', { count: acceptedCount });
         }
       })().catch((error) => {
         console.error('[markAcceptAll] Failed to persist suggestion acceptance via share mutation:', error);
+        void recoverShareMarksAfterMutationFailure({
+          failure: error,
+          fallbackMessage: 'Unable to accept suggestions.',
+          fetchOpenContext: () => shareClient.fetchOpenContext(),
+          showErrorBanner: (message) => this.showErrorBanner(message),
+          applyServerMarks: (marks) => this.applyAcceptedServerMarksAndRefreshStats(marks),
+        });
       });
       return acceptedIds.length;
     }
@@ -9046,27 +9112,48 @@ class ProofEditorImpl implements ProofEditor {
         const actor = getCurrentActor();
         void (async () => {
           let latestServerMarks: Record<string, StoredMark> | null = null;
+          let rejectedCount = 0;
+          let lastFailure: unknown = null;
           for (const suggestionId of rejectedIds) {
             const result = await shareClient.rejectSuggestion(suggestionId, actor);
-            if (!result || 'error' in result || result.success !== true) continue;
+            if (!result || 'error' in result || result.success !== true) {
+              lastFailure = result;
+              continue;
+            }
             const serverMarks = (result.marks && typeof result.marks === 'object' && !Array.isArray(result.marks))
               ? result.marks as Record<string, StoredMark>
               : null;
             if (!serverMarks) continue;
             latestServerMarks = serverMarks;
+            rejectedCount += 1;
           }
-          if (!latestServerMarks) return;
-          this.lastReceivedServerMarks = { ...latestServerMarks };
-          this.initialMarksSynced = true;
-          if (this.editor) {
-            this.editor.action((innerCtx) => {
-              const innerView = innerCtx.get(editorViewCtx);
-              const mergedMetadata = mergePendingServerMarks(getMarkMetadataWithQuotes(innerView.state), latestServerMarks!);
-              setMarkMetadata(innerView, mergedMetadata);
-            });
+          const failedCount = rejectedIds.length - rejectedCount;
+          if (latestServerMarks) this.mergeServerMarksIntoPendingView(latestServerMarks);
+          if (failedCount > 0) {
+            if (latestServerMarks) {
+              this.showErrorBanner(getShareMarkMutationFailureMessage(
+                lastFailure,
+                `${failedCount} of ${rejectedIds.length} suggestions could not be rejected.`,
+              ));
+            } else {
+              void recoverShareMarksAfterMutationFailure({
+                failure: lastFailure,
+                fallbackMessage: 'Unable to reject suggestions.',
+                fetchOpenContext: () => shareClient.fetchOpenContext(),
+                showErrorBanner: (message) => this.showErrorBanner(message),
+                applyServerMarks: (marks) => this.mergeServerMarksIntoPendingView(marks),
+              });
+            }
           }
         })().catch((error) => {
           console.error('[markRejectAll] Failed to persist suggestion rejection via share mutation:', error);
+          void recoverShareMarksAfterMutationFailure({
+            failure: error,
+            fallbackMessage: 'Unable to reject suggestions.',
+            fetchOpenContext: () => shareClient.fetchOpenContext(),
+            showErrorBanner: (message) => this.showErrorBanner(message),
+            applyServerMarks: (marks) => this.mergeServerMarksIntoPendingView(marks),
+          });
         });
       }
       if (count > 0) {

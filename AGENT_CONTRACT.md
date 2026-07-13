@@ -159,6 +159,27 @@ Use `POST /documents/:slug/ops` with:
 
 Send `Idempotency-Key` on mutation requests so retries stay safe.
 
+### Suggestion accept disambiguation (additive)
+
+`suggestion.accept` re-resolves the suggestion's stored anchor against the
+document's *current* markdown, since it may have changed since the
+suggestion was added. If that anchor text now matches more than one place
+(e.g. duplicated content), the request fails closed:
+
+```
+409 { "success": false, "code": "ANCHOR_AMBIGUOUS", "details": { "candidateCount": <n> }, "nextSteps": [...] }
+```
+
+To disambiguate, retry `suggestion.accept` with an optional `target`, using
+the same shape accepted by `suggestion.add`/`comment.add`
+(`{ anchor, mode?, occurrence?, contextBefore?, contextAfter? }`). When
+present, it fully replaces the stored anchor for that request — supply
+`occurrence: "first" | "last" | <0-based index>` and/or
+`contextBefore`/`contextAfter` to pick the intended match. Omit `target`
+entirely for the unchanged default behavior. `suggestion.reject` accepts
+the same optional `target` field for symmetry but never needs it — reject
+never re-resolves a position.
+
 ### Event polling
 
 - Poll: `GET /documents/:slug/events/pending?after=<id>&limit=<n>`
