@@ -1010,6 +1010,37 @@ export class DocumentDO extends YServer {
     };
   }
 
+  /**
+   * Human-facing history (Share menu "View activity"): the same event log
+   * as listEvents, newest-first, without poll/ack internals. See
+   * docs/adr/2026-07-share-activity-history-view.md.
+   */
+  async listActivity(limit: number): Promise<{
+    items: Array<Record<string, unknown>>;
+  }> {
+    const l = Math.max(1, Math.min(200, Math.trunc(Number(limit) || 50)));
+    const rows = this.store
+      .exec('SELECT * FROM document_event ORDER BY id DESC LIMIT ?', l)
+      .toArray();
+    const items = rows.map((row) => {
+      let data: unknown = {};
+      try {
+        data = JSON.parse(String(row.event_data));
+      } catch {
+        // tolerate malformed rows
+      }
+      return {
+        id: Number(row.id),
+        type: String(row.event_type),
+        data,
+        actor: row.actor === null ? null : String(row.actor),
+        ...(row.operator ? { operator: String(row.operator) } : {}),
+        createdAt: String(row.created_at),
+      };
+    });
+    return { items };
+  }
+
   /** Ack events up to a cursor (at-least-once; advisory, upstream shape). */
   async ackEvents(upToId: number, by: string): Promise<number> {
     const cursor = this.store.exec(

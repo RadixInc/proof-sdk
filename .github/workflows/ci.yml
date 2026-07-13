@@ -57,6 +57,10 @@ jobs:
       # Finalized suggestions dissolve their anchor spans and cannot be
       # resurrected by a stale client's delete-and-re-add.
       - run: npm run test:suggestion-finalize
+      # Share menu "View activity": newest-first history, distinct from the
+      # Agent Bridge's poll/ack /events/pending.
+      - run: npm run test:share-activity
+      - run: npm run test:actor-activity-format
 
   leak-scan:
     runs-on: ubuntu-latest

@@ -176,7 +176,7 @@ import type { CommentSelector, Comment } from '../formats/provenance-sidecar';
 import { normalizeQuote, extractMarks, embedMarks, getThread, migrateProvenanceToMarks, type OrchestratedMarkMeta } from '../formats/marks';
 import { proofMarkHandler } from '../formats/remark-proof-marks';
 import { remarkProofMarksPlugin } from './schema/remark-proof-marks-plugin';
-import { getCurrentActor, setCurrentActor as setCurrentActorValue, normalizeActor, deriveDisplayNameFromEmail } from './actor';
+import { getCurrentActor, setCurrentActor as setCurrentActorValue, normalizeActor, deriveDisplayNameFromEmail, formatActivityActor } from './actor';
 import {
   shouldKeepalivePersistShareContent,
   shouldKeepalivePersistShareMarks,
@@ -228,6 +228,34 @@ import { WebHaptics } from 'web-haptics';
 import '../agent/external-agent-bridge';
 
 const LEGACY_REST_FALLBACK = false;
+
+/** Human-readable labels for the Share "Activity" history; unknown types fall back to the raw type string. */
+const ACTIVITY_TYPE_LABELS: Record<string, string> = {
+  'comment.added': 'commented',
+  'comment.replied': 'replied',
+  'comment.resolved': 'resolved a comment',
+  'comment.unresolved': 'reopened a comment',
+  'suggestion.added': 'suggested a change',
+  'suggestion.accepted': 'accepted a suggestion',
+  'suggestion.rejected': 'rejected a suggestion',
+  'document.rewritten': 'rewrote the document',
+  'document.updated': 'updated the document',
+  'document.title.updated': 'renamed the document',
+  'document.paused': 'paused sharing',
+  'document.resumed': 'resumed sharing',
+  'document.revoked': 'revoked sharing',
+  'document.deleted': 'deleted the document',
+};
+
+/** "2026-07-13T12:31:21.123Z" -> "Jul 13, 2026, 12:31 PM" for the Activity list; falls back to the raw ISO string. */
+function formatActivityTimestamp(createdAt: string): string {
+  const parsed = new Date(createdAt);
+  if (Number.isNaN(parsed.getTime())) return createdAt;
+  return parsed.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
 
 // Global proof interface for the web editor runtime
 declare global {
@@ -1096,8 +1124,6 @@ class ProofEditorImpl implements ProofEditor {
   private pendingCommentDraftRestoreTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingCommentDraftSnapshot: CommentPopoverDraftSnapshot | null = null;
   private shareAgentPresenceSummary: string = '';
-  private shareAgentActivitySignature: string = '';
-  private shareAgentActivityItems: Array<Record<string, any>> = [];
   private shareAgentPresenceFallback = new Map<string, {
     id: string;
     name: string;
@@ -3529,8 +3555,6 @@ class ProofEditorImpl implements ProofEditor {
     this.shareAgentPresenceFallback.clear();
     this.shareAgentPresenceIcons.clear();
     this.shareAgentPresenceSummary = '';
-    this.shareAgentActivitySignature = '';
-    this.shareAgentActivityItems = [];
   }
 
   private installShareAgentPresenceObservers(): void {
@@ -3541,7 +3565,6 @@ class ProofEditorImpl implements ProofEditor {
     if (!ydoc || typeof ydoc.getMap !== 'function' || typeof ydoc.getArray !== 'function') return;
 
     const presenceMap: any = ydoc.getMap('agentPresence');
-    const activityArr: any = ydoc.getArray('agentActivity');
     const cursorMap: any = ydoc.getMap('agentCursors');
 
     const refreshCursors = () => {
@@ -3693,27 +3716,10 @@ class ProofEditorImpl implements ProofEditor {
         }).join(', ')}`
         : '';
 
-      let activity: any[] = [];
-      try {
-        activity = typeof activityArr.toArray === 'function' ? activityArr.toArray() : [];
-      } catch {
-        activity = [];
-      }
-      const items = activity
-        .filter((v) => v && typeof v === 'object' && !Array.isArray(v))
-        .slice(-50) as Array<Record<string, any>>;
-
-      const activitySignature = items
-        .map((item) => `${String(item.type ?? '')}:${String(item.id ?? '')}:${String(item.status ?? '')}:${String(item.at ?? '')}`)
-        .join('|');
       const summaryChanged = summary !== this.shareAgentPresenceSummary;
-      const activityChanged = activitySignature !== this.shareAgentActivitySignature;
-
       this.shareAgentPresenceSummary = summary;
-      this.shareAgentActivitySignature = activitySignature;
-      this.shareAgentActivityItems = items;
 
-      if (summaryChanged || activityChanged) {
+      if (summaryChanged) {
         this.updateShareBannerPresenceDisplay();
         this.updateShareBannerAgentControlDisplay();
       }
@@ -3721,14 +3727,12 @@ class ProofEditorImpl implements ProofEditor {
 
     try {
       presenceMap.observe(refresh);
-      activityArr.observe(refresh);
       cursorMap.observe(refreshCursors);
     } catch {
       // ignore observer install failures
     }
     this.shareAgentPresenceCleanup = () => {
       try { presenceMap.unobserve(refresh); } catch { /* ignore */ }
-      try { activityArr.unobserve(refresh); } catch { /* ignore */ }
       try { cursorMap.unobserve(refreshCursors); } catch { /* ignore */ }
     };
 
@@ -3769,25 +3773,14 @@ class ProofEditorImpl implements ProofEditor {
 
     const body = document.createElement('div');
     body.style.cssText = 'max-height:60vh;overflow:auto;padding:10px 16px 16px 16px';
-
-    const items = this.shareAgentActivityItems.slice(-50).reverse();
-    if (items.length === 0) {
-      const empty = document.createElement('div');
-      empty.textContent = 'No activity yet.';
-      empty.style.cssText = 'padding:14px 0;color:var(--text-muted, #797d90);font-size:12px;line-height:1.35';
-      body.appendChild(empty);
-    } else {
-      for (const item of items) {
-        const row = document.createElement('div');
-        row.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--border, #e5e5ec);font-size:12px;line-height:1.35';
-        const when = typeof item.at === 'string' ? item.at : '';
-        const who = typeof item.name === 'string' ? item.name : (typeof item.id === 'string' ? item.id : 'agent');
-        const status = typeof item.status === 'string' ? item.status : (typeof item.type === 'string' ? item.type : '');
-        const details = typeof item.details === 'string' ? item.details : '';
-        row.textContent = `${when}  ${who}  ${status}${details ? ` — ${details}` : ''}`;
-        body.appendChild(row);
-      }
-    }
+    const setBodyMessage = (text: string) => {
+      body.replaceChildren();
+      const msg = document.createElement('div');
+      msg.textContent = text;
+      msg.style.cssText = 'padding:14px 0;color:var(--text-muted, #797d90);font-size:12px;line-height:1.35';
+      body.appendChild(msg);
+    };
+    setBodyMessage('Loading…');
 
     panel.append(header, body);
     overlay.appendChild(panel);
@@ -3806,6 +3799,29 @@ class ProofEditorImpl implements ProofEditor {
       if (ev.target === overlay) cleanup();
     });
     close.onclick = cleanup;
+
+    void shareClient.fetchActivity({ limit: 50 }).then((result) => {
+      if (!overlay.isConnected) return;
+      if (!result || 'error' in result) {
+        setBodyMessage('Could not load activity.');
+        return;
+      }
+      if (result.items.length === 0) {
+        setBodyMessage('No activity yet.');
+        return;
+      }
+      body.replaceChildren();
+      for (const item of result.items) {
+        const row = document.createElement('div');
+        row.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--border, #e5e5ec);font-size:12px;line-height:1.35';
+        const who = formatActivityActor(item.actor, item.operator ?? null);
+        const label = ACTIVITY_TYPE_LABELS[item.type] ?? item.type;
+        row.textContent = `${formatActivityTimestamp(item.createdAt)}  ${who}  ${label}`;
+        body.appendChild(row);
+      }
+    }).catch(() => {
+      if (overlay.isConnected) setBodyMessage('Could not load activity.');
+    });
   }
 
   private openAgentHelpModal(): void {

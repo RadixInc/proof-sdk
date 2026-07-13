@@ -73,3 +73,7 @@ A typed mutation submitted by an agent (`comment.add`, `suggestion.accept`, `rew
 
 **Event**:
 A durable, per-document queue entry an agent polls and acks to observe changes.
+
+**Activity**:
+The human-facing, read-only history of what happened to a Document — comments, replies, resolutions, and suggestion decisions by any actor (human or agent) — projected from the same durable log as Agent Bridge Events, but without polling or acking semantics.
+_Avoid_: event (unqualified — that term is scoped to the Agent Bridge's poll/ack queue, not this read-only view)
