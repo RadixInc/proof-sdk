@@ -51,6 +51,7 @@ import {
   setAgentSelection,
   clearAgentCursor,
   getAgentCursorState,
+  hideThinkingPanel,
 } from './plugins/agent-cursor';
 import {
   suggestionsPlugins,
@@ -66,6 +67,7 @@ import {
   openCommentComposer,
   captureCommentPopoverDraft,
   restoreCommentPopoverDraft,
+  closeActivePopover,
   type CommentPopoverDraftSnapshot,
 } from './plugins/mark-popover';
 import { markSelectionBarPlugin } from './plugins/mark-selection-bar';
@@ -81,9 +83,11 @@ import {
 } from './plugins/share-permissions';
 import { findHighlightsPlugin, setFindHighlights, clearFindHighlights } from './plugins/find-highlights';
 import { arrowCommentPlugin } from './plugins/arrow-comment';
-import { markdownLinkClickPlugin } from './plugins/markdown-link-click';
+import { markdownLinkClickPlugin, dismissLinkHoverCard } from './plugins/markdown-link-click';
+import { buildSourceBlockDescriptors, diffSourceBlocks, joinSourceBlocks } from './source-block-diff';
 import { mermaidDiagramsPlugin } from './plugins/mermaid-diagrams';
 import { taskCheckboxesPlugin } from './plugins/task-checkboxes';
+import { Fragment } from '@milkdown/kit/prose/model';
 import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { TextSelection } from '@milkdown/kit/prose/state';
@@ -142,7 +146,7 @@ import {
   type BatchResult,
 } from './batch-executor';
 import { syncAgentSessions } from '../analytics/agent-sessions';
-import { initThemePicker, getThemePicker } from '../ui/theme-picker';
+import { initThemePicker, getThemePicker, type DocView } from '../ui/theme-picker';
 import { initProvenanceLegend } from '../ui/provenance-legend';
 import { fileClient } from '../bridge/file-client';
 import { shareClient, type CollabSessionInfo, type SharePendingEvent } from '../bridge/share-client';
@@ -741,7 +745,7 @@ export interface ProofEditor {
   insertAt(offset: number, text: string, author?: string): void;
   insertAtCursor(text: string, author?: string): void;
   replaceSelection(text: string, author?: string): void;
-  replaceRange(from: number, to: number, text: string, author?: string): void;
+  replaceRange(from: number, to: number, text: string, author?: string): { ok: true } | { ok: false; error: string };
 
   // Agent cursor methods (for AI agent navigation)
   setAgentCursor(position: number, animateOrActor?: boolean | string, actor?: string): void;
@@ -1017,6 +1021,11 @@ class ProofEditorImpl implements ProofEditor {
   private reviewLockBanner: HTMLElement | null = null;
   private reviewInFlight: Promise<unknown> | null = null;
   private lastMarkdown: string = '';
+  private isSourceViewActive: boolean = false;
+  private sourcePanelEl: HTMLElement | null = null;
+  private sourcePanelErrorEl: HTMLElement | null = null;
+  private sourcePanelDirty: boolean = false;
+  private sourcePanelCommitTimeout: ReturnType<typeof setTimeout> | null = null;
   private suppressMarksSync: boolean = false;
   private collabEnabled: boolean = false;
   private collabCanComment: boolean = false;
@@ -1271,8 +1280,9 @@ class ProofEditorImpl implements ProofEditor {
 
     // Theme picker and provenance legend apply in both regular and share mode —
     // share mode is where the suggestion popover and provenance gutter live.
-    initThemePicker();
+    const themePicker = initThemePicker({ onViewChange: (view) => this.setDocView(view) });
     initProvenanceLegend();
+    this.setDocView(themePicker.getView());
 
     // If in CLI mode, load the file from the API
     if (this.isCliMode) {
@@ -5027,10 +5037,14 @@ class ProofEditorImpl implements ProofEditor {
     editor.style.paddingTop = `${Math.ceil(offset + extraSpacing)}px`;
   }
 
-  private updateEditableState(viewOverride?: EditorView): void {
-    const isEditable = !this.isReadOnly
+  private isEditableNow(): boolean {
+    return !this.isReadOnly
       && this.reviewLockCount === 0
       && (!this.isShareMode || this.shareAllowLocalEdits);
+  }
+
+  private updateEditableState(viewOverride?: EditorView): void {
+    const isEditable = this.isEditableNow();
 
     const applyEditableState = (view: EditorView) => {
       view.setProps({
@@ -5421,6 +5435,181 @@ class ProofEditorImpl implements ProofEditor {
     return { line: Math.max(0, line - 1), col };
   }
 
+  /**
+   * Lazily builds the editable raw-markdown panel shown in Source view, as a
+   * sibling of #editor inside #editor-container so it inherits the same
+   * reading column. Edits commit back into the live document at block
+   * granularity (see commitSourcePanelEdit) rather than on every keystroke.
+   */
+  private ensureSourcePanel(): HTMLElement {
+    if (this.sourcePanelEl) return this.sourcePanelEl;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'proof-source';
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'proof-source-input';
+    textarea.spellcheck = false;
+    textarea.setAttribute('aria-label', 'Document source (editable markdown)');
+
+    const error = document.createElement('div');
+    error.className = 'proof-source-error';
+    error.setAttribute('role', 'alert');
+
+    wrapper.appendChild(textarea);
+    wrapper.appendChild(error);
+
+    textarea.addEventListener('input', () => {
+      this.sourcePanelDirty = true;
+      if (this.sourcePanelCommitTimeout) clearTimeout(this.sourcePanelCommitTimeout);
+      // Long idle debounce as a safety net (not the primary trigger — see
+      // blur/setDocView) — deliberately much longer than the 150ms content-
+      // sync debounce elsewhere, since normal typing routinely passes through
+      // momentarily-unparseable states (e.g. an unclosed code fence).
+      this.sourcePanelCommitTimeout = setTimeout(() => this.commitSourcePanelEdit(), 1800);
+    });
+    textarea.addEventListener('blur', () => this.commitSourcePanelEdit());
+
+    const editorEl = document.getElementById('editor');
+    editorEl?.parentElement?.insertBefore(wrapper, editorEl.nextSibling);
+
+    this.sourcePanelEl = wrapper;
+    return wrapper;
+  }
+
+  /**
+   * Refresh the Source panel from the live document. Always derives fresh
+   * block descriptors rather than trusting any cached string, so remote
+   * (collab) edits are reflected for every block the reader isn't currently
+   * touching. Skipped entirely while the panel is dirty or focused, so a
+   * live remote update can't clobber an in-progress local edit — the next
+   * commit (blur/debounce/view-switch) already rebuilds from the live doc,
+   * so nothing is lost by skipping the overwrite here.
+   */
+  private refreshSourcePanel(): void {
+    if (!this.sourcePanelEl || !this.editor) return;
+    const textarea = this.sourcePanelEl.querySelector('textarea');
+    if (!textarea) return;
+    if (this.sourcePanelDirty || document.activeElement === textarea) return;
+
+    // Only CLI mode and share mode load content asynchronously after mount —
+    // in every other case (including the bare local/scratch editor) the live
+    // doc IS the final state from the moment the editor exists, even if
+    // empty, so there's nothing to actually wait for.
+    const awaitingInitialLoad = (this.isCliMode || this.isShareMode) && !this.hasTrackedDocumentOpened;
+    if (awaitingInitialLoad) {
+      textarea.value = 'Loading…';
+      return;
+    }
+
+    const ctx = this.editor.ctx;
+    const view = ctx.get(editorViewCtx);
+    const serializer = ctx.get(serializerCtx);
+    const descriptors = buildSourceBlockDescriptors(view.state.doc, (node) =>
+      serializer(view.state.doc.copy(Fragment.from(node)))
+    );
+    textarea.value = joinSourceBlocks(descriptors);
+    textarea.readOnly = !this.isEditableNow();
+  }
+
+  private showSourcePanelError(message: string): void {
+    if (!this.sourcePanelErrorEl) this.sourcePanelErrorEl = this.sourcePanelEl?.querySelector('.proof-source-error') ?? null;
+    if (!this.sourcePanelErrorEl) return;
+    this.sourcePanelErrorEl.textContent = message;
+    this.sourcePanelErrorEl.classList.add('visible');
+  }
+
+  private hideSourcePanelError(): void {
+    if (!this.sourcePanelErrorEl) this.sourcePanelErrorEl = this.sourcePanelEl?.querySelector('.proof-source-error') ?? null;
+    this.sourcePanelErrorEl?.classList.remove('visible');
+  }
+
+  /**
+   * Commit an edit made in the Source panel back into the live document.
+   * Diffs the panel's text against fresh block descriptors (built from the
+   * live doc, not a cache) to find the minimal changed block range, then
+   * applies it via the same collab-safe, scoped replaceRange primitive the
+   * agent bridge uses — never a whole-document reload — so marks on every
+   * block outside the edited range survive.
+   */
+  private commitSourcePanelEdit(): void {
+    if (this.sourcePanelCommitTimeout) {
+      clearTimeout(this.sourcePanelCommitTimeout);
+      this.sourcePanelCommitTimeout = null;
+    }
+    if (!this.editor || !this.sourcePanelDirty || !this.isEditableNow()) return;
+    const textarea = this.sourcePanelEl?.querySelector('textarea');
+    if (!textarea) return;
+
+    const ctx = this.editor.ctx;
+    const view = ctx.get(editorViewCtx);
+    const serializer = ctx.get(serializerCtx);
+    const parser = ctx.get(parserCtx);
+
+    const fresh = buildSourceBlockDescriptors(view.state.doc, (node) =>
+      serializer(view.state.doc.copy(Fragment.from(node)))
+    );
+    const diff = diffSourceBlocks(fresh, textarea.value);
+    if (!diff) {
+      this.sourcePanelDirty = false;
+      this.hideSourcePanelError();
+      return;
+    }
+
+    try {
+      parser(diff.replacementText);
+    } catch {
+      // Not parseable yet (e.g. an unclosed fence mid-keystroke) — silent
+      // skip, retried on the next debounce/blur tick. Not a user-visible
+      // error: normal typing routinely passes through this state.
+      return;
+    }
+
+    const from = diff.fromBlockIndex < fresh.length ? fresh[diff.fromBlockIndex].from : view.state.doc.content.size;
+    const to = diff.toBlockIndex > 0 ? fresh[diff.toBlockIndex - 1].to : 0;
+
+    const result = this.replaceRange(from, to, diff.replacementText, getCurrentActor());
+    if (result.ok) {
+      this.sourcePanelDirty = false;
+      this.hideSourcePanelError();
+    } else {
+      // Textarea value is left untouched (not reverted) and stays dirty so
+      // the next blur/debounce retries automatically once the reader adjusts.
+      this.showSourcePanelError(`Could not apply edit: ${result.error}`);
+    }
+  }
+
+  /**
+   * Toggle between the rendered Milkdown view and the editable raw markdown
+   * Source view. Visibility of #editor / .proof-source / the provenance
+   * gutter / legend is driven by the data-view attribute (see index.html);
+   * this only handles the parts that can't be pure CSS: committing any
+   * pending edit, populating the source panel, and closing chrome anchored
+   * to document.body that would otherwise dangle once #editor is hidden.
+   */
+  private setDocView(view: DocView): void {
+    const wasSourceActive = this.isSourceViewActive;
+    this.isSourceViewActive = view === 'source';
+
+    if (wasSourceActive && !this.isSourceViewActive) {
+      this.commitSourcePanelEdit();
+    }
+
+    if (!this.isSourceViewActive) return;
+
+    this.ensureSourcePanel();
+    this.refreshSourcePanel();
+
+    if (this.editor) {
+      this.editor.action((ctx) => {
+        const editorView = ctx.get(editorViewCtx);
+        closeActivePopover(editorView);
+        dismissLinkHoverCard(editorView);
+      });
+    }
+    hideThinkingPanel();
+  }
+
   private scheduleContentSync(): void {
     if (!this.editor) return;
     if (this.contentSyncTimeout) {
@@ -5444,6 +5633,7 @@ class ProofEditorImpl implements ProofEditor {
 
         try {
           this.lastMarkdown = markdown;
+          if (this.isSourceViewActive) this.refreshSourcePanel();
           this.sendDocumentSnapshot(view, markdown);
           if (this.collabEnabled && this.collabCanEdit && this.shouldPublishProjectionMarkdown('content-sync')) {
             this.publishProjectionMarkdown(view, markdown, 'content-sync');
@@ -5826,6 +6016,7 @@ class ProofEditorImpl implements ProofEditor {
         tr = tr.setMeta(SHARE_CONTENT_FILTER_ALLOW_META, true);
       }
       view.dispatch(tr);
+      if (this.isSourceViewActive) this.refreshSourcePanel();
 
       const authoredMarkType = view.state.schema.marks.proofAuthored;
       let hasAuthoredMarks = false;
@@ -6275,45 +6466,52 @@ class ProofEditorImpl implements ProofEditor {
    * @param text - Replacement text
    * @param author - Optional author (e.g., 'ai:claude' or 'human:dan'). If provided, creates an authored mark.
    */
-  replaceRange(from: number, to: number, text: string, author?: string): void {
+  replaceRange(from: number, to: number, text: string, author?: string): { ok: true } | { ok: false; error: string } {
     if (!this.editor) {
       console.warn('[replaceRange] Editor not initialized');
-      return;
+      return { ok: false, error: 'editor not initialized' };
     }
 
-    this.editor.action((ctx) => {
-      const view = ctx.get(editorViewCtx);
-      const parser = ctx.get(parserCtx);
-      const docSizeBefore = view.state.doc.content.size;
-      const clampedFrom = Math.max(0, Math.min(from, docSizeBefore));
-      const clampedTo = Math.max(0, Math.min(to, docSizeBefore));
-      const rangeLength = clampedTo - clampedFrom;
+    try {
+      this.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const parser = ctx.get(parserCtx);
+        const docSizeBefore = view.state.doc.content.size;
+        const clampedFrom = Math.max(0, Math.min(from, docSizeBefore));
+        const clampedTo = Math.max(0, Math.min(to, docSizeBefore));
+        const rangeLength = clampedTo - clampedFrom;
 
-      // Parse the text as markdown and replace
-      const newContent = parser(text);
-      let tr = view.state.tr.replaceWith(clampedFrom, clampedTo, newContent.content);
+        // Parse the text as markdown and replace
+        const newContent = parser(text);
+        let tr = view.state.tr.replaceWith(clampedFrom, clampedTo, newContent.content);
 
-      // Mark as AI-authored if author is specified (prevents double-marking by human tracker)
-      if (author) {
-        tr = tr.setMeta('ai-authored', true);
-      }
-      view.dispatch(tr);
+        // Mark as AI-authored if author is specified (prevents double-marking by human tracker)
+        if (author) {
+          tr = tr.setMeta('ai-authored', true);
+        }
+        view.dispatch(tr);
 
-      // Calculate actual inserted length by comparing doc sizes
-      // Net change = newLength - rangeLength, so newLength = netChange + rangeLength
-      const docSizeAfter = view.state.doc.content.size;
-      const actualInsertedLength = (docSizeAfter - docSizeBefore) + rangeLength;
+        // Calculate actual inserted length by comparing doc sizes
+        // Net change = newLength - rangeLength, so newLength = netChange + rangeLength
+        const docSizeAfter = view.state.doc.content.size;
+        const actualInsertedLength = (docSizeAfter - docSizeBefore) + rangeLength;
 
-      // Create authored mark for the replacement content if author is specified
-      if (author && actualInsertedLength > 0) {
-        const range: MarkRange = { from: clampedFrom, to: clampedFrom + actualInsertedLength };
-        addAuthoredMark(view, author, range, text);
-        console.log('[replaceRange] Created authored mark for', author, 'at range', range, 'actualLength:', actualInsertedLength);
+        // Create authored mark for the replacement content if author is specified
+        if (author && actualInsertedLength > 0) {
+          const range: MarkRange = { from: clampedFrom, to: clampedFrom + actualInsertedLength };
+          addAuthoredMark(view, author, range, text);
+          console.log('[replaceRange] Created authored mark for', author, 'at range', range, 'actualLength:', actualInsertedLength);
 
-      }
+        }
 
-      console.log('[replaceRange] Replaced range from', clampedFrom, 'to', clampedTo, 'actualLength:', actualInsertedLength);
-    });
+        console.log('[replaceRange] Replaced range from', clampedFrom, 'to', clampedTo, 'actualLength:', actualInsertedLength);
+      });
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[replaceRange] Failed to apply replacement', message);
+      return { ok: false, error: message };
+    }
   }
 
   setHeatMapMode(mode: string): void {

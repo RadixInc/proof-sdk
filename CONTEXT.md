@@ -51,6 +51,10 @@ The record of which actor authored which spans of a document; for a delegated Ag
 **Projection**:
 The derived read model of a document (markdown, marks, plain text) computed from the canonical collaborative state.
 
+**Source View**:
+The editor mode that displays and edits a document's markdown Projection directly, in place of the rendered Milkdown/ProseMirror prose. Edits commit back into the canonical collaborative state at block granularity.
+_Avoid_: raw view, markdown mode
+
 **Yjs Snapshot**:
 A periodic full serialization of a document's CRDT state, used to bound replay of incremental updates.
 _Avoid_: snapshot (unqualified — collides with Share Snapshot)

@@ -1982,6 +1982,10 @@ export function restoreCommentPopoverDraft(
   return controller.restoreDraftSnapshot(snapshot);
 }
 
+export function closeActivePopover(view: EditorView): void {
+  controllers.get(view)?.close();
+}
+
 export const markPopoverPlugin = $prose(() => {
   return new Plugin({
     key: markPopoverKey,
