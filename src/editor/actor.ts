@@ -1,3 +1,5 @@
+import { deriveAgentNameFromId, isAgentScopedId } from '../shared/agent-identity';
+
 const DEFAULT_ACTOR = 'human:user';
 
 let currentActor = DEFAULT_ACTOR;
@@ -27,4 +29,22 @@ export function deriveDisplayNameFromEmail(email: string): string {
   return words
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
+}
+
+/**
+ * Renders a document_event actor/operator pair as a readable name for the
+ * Share "Activity" history — this SDK's first UI surface that names a
+ * specific actor rather than just categorizing human/AI/mixed provenance.
+ */
+export function formatActivityActor(actor: string | null, operator?: string | null): string {
+  if (!actor) return 'Unknown';
+  if (actor.startsWith('human:')) {
+    const email = actor.slice('human:'.length);
+    return email ? deriveDisplayNameFromEmail(email) : 'Unknown';
+  }
+  if (isAgentScopedId(actor)) {
+    const agentName = deriveAgentNameFromId(actor);
+    return operator ? `${agentName} (via ${deriveDisplayNameFromEmail(operator)})` : agentName;
+  }
+  return actor;
 }

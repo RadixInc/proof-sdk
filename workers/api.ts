@@ -974,6 +974,27 @@ async function handleEventsPending(
   return json({ success: true, events, cursor });
 }
 
+/** Share menu "View activity": human-facing history, newest-first. */
+async function handleActivity(
+  request: Request,
+  env: ApiEnv,
+  slug: string,
+  identity: Identity,
+): Promise<Response> {
+  const { state, role: tokenRole } = await loadDocAndRole(request, env, slug);
+  if (!state) return json({ success: false, error: 'Document not found' }, 404);
+  const role =
+    tokenRole ??
+    (identity.kind === 'human' ? resolveDefaultHumanRole(env) : null);
+  const denied = gateEventsAccess(state, role);
+  if (denied) return denied;
+  const url = new URL(request.url);
+  const limit = Number(url.searchParams.get('limit') ?? '50');
+  const stub = env.DOCUMENT_DO.get(env.DOCUMENT_DO.idFromName(slug));
+  const { items } = await stub.listActivity(limit);
+  return json({ success: true, items });
+}
+
 async function handleEventsAck(
   request: Request,
   env: ApiEnv,
@@ -1265,6 +1286,11 @@ export async function handleApiRequest(
     if (method === 'POST' && eventsMatch[2] === 'ack') {
       return handleEventsAck(request, env, eventsMatch[1], _identity);
     }
+  }
+
+  const activityMatch = path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/activity$/);
+  if (method === 'GET' && activityMatch) {
+    return handleActivity(request, env, activityMatch[1], _identity);
   }
 
   const titleMatch = path.match(/^\/(?:api\/)?documents\/([a-z0-9-]+)\/title$/);

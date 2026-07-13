@@ -82,6 +82,25 @@ export interface SharePendingEventsResponse {
   cursor: number;
 }
 
+/**
+ * Share menu "View activity" — newest-first history, distinct from
+ * SharePendingEvent's poll/ack shape. See
+ * docs/adr/2026-07-share-activity-history-view.md.
+ */
+export interface ShareActivityItem {
+  id: number;
+  type: string;
+  data: Record<string, unknown>;
+  actor: string | null;
+  operator?: string;
+  createdAt: string;
+}
+
+export interface ShareActivityResponse {
+  success: boolean;
+  items: ShareActivityItem[];
+}
+
 export type ShareRequestError = {
   error: {
     status: number;
@@ -666,6 +685,45 @@ export class ShareClient {
             createdAt: typeof event?.createdAt === 'string' ? event.createdAt : '',
             ackedAt: typeof event?.ackedAt === 'string' ? event.ackedAt : null,
             ackedBy: typeof event?.ackedBy === 'string' ? event.ackedBy : null,
+          }))
+        : [],
+    };
+  }
+
+  async fetchActivity(
+    options?: { token?: string; limit?: number },
+  ): Promise<ShareActivityResponse | ShareRequestError | null> {
+    if (!this.slug) return null;
+    const params = new URLSearchParams();
+    params.set('limit', String(Math.max(1, Math.min(200, Math.trunc(options?.limit ?? 50)))));
+    const response = await fetch(`${this.getApiBase()}/documents/${this.slug}/activity?${params.toString()}`, {
+      headers: this.getShareAuthHeaders(options?.token),
+    });
+    if (!response.ok) return this.parseRequestError(response);
+    const payload = await this.readJsonPayload<{
+      success?: boolean;
+      items?: Array<{
+        id?: number;
+        type?: string;
+        data?: Record<string, unknown>;
+        actor?: string | null;
+        operator?: string;
+        createdAt?: string;
+      }>;
+    }>(response);
+    if (!payload) return null;
+    return {
+      success: payload.success === true,
+      items: Array.isArray(payload.items)
+        ? payload.items
+          .filter((item) => typeof item?.id === 'number' && Number.isFinite(item.id) && typeof item?.type === 'string')
+          .map((item) => ({
+            id: Math.trunc(item.id as number),
+            type: String(item.type),
+            data: item?.data && typeof item.data === 'object' && !Array.isArray(item.data) ? item.data : {},
+            actor: typeof item?.actor === 'string' ? item.actor : null,
+            ...(typeof item?.operator === 'string' && item.operator ? { operator: item.operator } : {}),
+            createdAt: typeof item?.createdAt === 'string' ? item.createdAt : '',
           }))
         : [],
     };
