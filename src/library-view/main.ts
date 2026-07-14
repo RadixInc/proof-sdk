@@ -281,9 +281,13 @@ async function main() {
   function wire(): void {
     const root = app!;
     root.querySelector<HTMLInputElement>('.search input')?.addEventListener('input', (e) => {
-      query = (e.target as HTMLInputElement).value;
+      const target = e.target as HTMLInputElement;
+      const cursor = target.selectionStart;
+      query = target.value;
       render();
-      root.querySelector<HTMLInputElement>('.search input')?.focus();
+      const input = root.querySelector<HTMLInputElement>('.search input');
+      input?.focus();
+      if (cursor !== null) input?.setSelectionRange(cursor, cursor);
     });
     root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((btn) => {
       btn.addEventListener('click', () => {
