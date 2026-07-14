@@ -32,10 +32,15 @@
   // /whoami, /d/:slug) and the Worker never runs — bypassing routing and
   // the identity gate. The Worker ends with env.ASSETS.fetch(), so asset
   // serving still works; it just goes through the Worker.
+  // html_handling: "none" matters for /library (workers/api.ts) — it
+  // fetches the literal "/library.html" asset path directly; the default
+  // "auto-trailing-slash" would 308-redirect that back to "/library",
+  // which re-enters the same Worker branch and loops forever.
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
+    "html_handling": "none",
     "run_worker_first": true
   },
 

@@ -93,12 +93,22 @@ async function main() {
     const deletedRow = (aliceAfter.body.documents as any[]).find((d) => d.slug === doc2.slug);
     ok('deleted doc listed with its state', deletedRow?.shareState === 'DELETED', deletedRow);
 
-    // HTML view + access rules.
+    // HTML view (the built SPA shell — it fetches /api/library itself, so
+    // this only asserts the shell is served, not that it contains data)
+    // + access rules.
     const htmlRes = await fetch(`${BASE}/library`, { headers: ALICE });
     const html = await htmlRes.text();
-    ok('/library HTML renders titles', htmlRes.status === 200 && String(htmlRes.headers.get('content-type')).includes('text/html') && html.includes('Doc One'));
+    ok(
+      '/library serves the SPA shell',
+      htmlRes.status === 200 &&
+        String(htmlRes.headers.get('content-type')).includes('text/html') &&
+        html.includes('id="app"'),
+      html.slice(0, 200),
+    );
     const agentLib = await library(AGENT);
-    ok('agents get 403 from the library', agentLib.status === 403);
+    ok('agents get 403 from the library JSON', agentLib.status === 403);
+    const agentHtmlRes = await fetch(`${BASE}/library`, { headers: AGENT });
+    ok('agents get 403 from the library HTML', agentHtmlRes.status === 403);
 
     console.log(`\nworker-library: ${passed} assertions passed`);
   } finally {
