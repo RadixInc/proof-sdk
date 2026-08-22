@@ -117,7 +117,14 @@ function sanitizeHost(host) {
   return host.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
+function assertValidSlug(slug) {
+  if (typeof slug !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(slug)) {
+    throw new Error(`Invalid slug "${slug}": expected only alphanumerics, "-", "_"`);
+  }
+}
+
 function secretsFile(host, slug) {
+  assertValidSlug(slug);
   return path.join(SECRETS_DIR, sanitizeHost(host), `${slug}.json`);
 }
 
