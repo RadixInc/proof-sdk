@@ -87,3 +87,10 @@ test('a document URL cannot redirect credentials to a different host', () => {
     /only sent to the configured host/
   );
 });
+
+test('redact leaves ?token= in document text alone but still masks known secrets', () => {
+  const accessToken = 'aaaaaaaa-0000-4000-8000-fixturetoken1';
+  const out = redact({ markdown: `docs: https://docs.example.test/x?token=abc and ${accessToken}`, accessToken });
+  assert.match(out.markdown, /\?token=abc /);
+  assert.ok(!out.markdown.includes(accessToken));
+});

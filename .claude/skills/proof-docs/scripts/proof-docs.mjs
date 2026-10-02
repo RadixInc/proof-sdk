@@ -13,6 +13,10 @@ const CONFIG_DIR = path.join(os.homedir(), '.config', 'proof-docs');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const SECRETS_DIR = path.join(CONFIG_DIR, 'secrets');
 const SECRET_FIELDS = ['ownerSecret', 'accessToken'];
+// Fields the API fills with share links; only these get ?token= masked, so document text that
+// happens to contain "?token=" comes back unchanged.
+const LINK_FIELDS = ['tokenUrl', 'tokenPath'];
+const TOKEN_QUERY = /([?&]token=)[^&\s"'<>]+/g;
 
 function readJson(file) {
   try {
@@ -118,9 +122,7 @@ function collectSecretValues(value, found = new Set()) {
 }
 
 function maskString(str, secrets) {
-  // Share links carry the token as ?token=; mask that first (even for values that aren't known
-  // secrets), then truncate any remaining copy of a known secret.
-  let out = str.replace(/([?&]token=)[^&\s"'<>]+/g, '$1<redacted>');
+  let out = str;
   for (const secret of secrets) out = out.split(secret).join(truncate(secret));
   return out;
 }
@@ -130,7 +132,9 @@ function redact(value, secrets = collectSecretValues(value)) {
   if (value && typeof value === 'object') {
     const out = {};
     for (const [k, v] of Object.entries(value)) {
-      out[k] = SECRET_FIELDS.includes(k) ? truncate(v) : redact(v, secrets);
+      if (SECRET_FIELDS.includes(k)) out[k] = truncate(v);
+      else if (LINK_FIELDS.includes(k) && typeof v === 'string') out[k] = maskString(v.replace(TOKEN_QUERY, '$1<redacted>'), secrets);
+      else out[k] = redact(v, secrets);
     }
     return out;
   }
@@ -193,14 +197,18 @@ function parseArgs(argv) {
 
 class HttpError extends Error {
   constructor(status, statusText, body) {
-    super(`HTTP ${status} ${statusText}: ${JSON.stringify(body)}`);
+    super(`HTTP ${status} ${statusText}: ${JSON.stringify(redact(body))}`);
     this.status = status;
     this.body = body;
   }
 }
 
 async function doFetch(url, options) {
-  const res = await fetch(url, options);
+  // Never follow redirects: fetch would carry CF-Access-Client-* headers to the new origin.
+  const res = await fetch(url, { ...options, redirect: 'manual' });
+  if (res.status >= 300 && res.status < 400) {
+    throw new HttpError(res.status, res.statusText, `redirect to ${res.headers.get('location') || '(no location)'} not followed; credentials are only sent to the configured host`);
+  }
   const text = await res.text();
   let body;
   try {
@@ -521,7 +529,7 @@ async function cmdReplace(positional, flags) {
 
 async function probe(url, headers) {
   try {
-    const res = await fetch(url, { headers });
+    const res = await fetch(url, { headers, redirect: 'manual' });
     const text = await res.text();
     let body;
     try { body = JSON.parse(text); } catch { body = text; }
