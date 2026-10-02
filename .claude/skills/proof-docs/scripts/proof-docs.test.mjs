@@ -5,6 +5,7 @@ import {
   buildHeaders,
   chooseCredential,
   explainFailure,
+  assertConfiguredHost,
   parseDocRef,
   redact,
   slugFromPath,
@@ -76,4 +77,13 @@ test('a document token is not replaced by the creation API key', () => {
   assert.equal(headers.Authorization, 'Bearer doc-token');
   const keyOnly = buildHeaders({ host: 'http://localhost:4000', apiKey: 'creation-key' }, {});
   assert.equal(keyOnly.Authorization, 'Bearer creation-key');
+});
+
+test('a document URL cannot redirect credentials to a different host', () => {
+  assert.doesNotThrow(() => assertConfiguredHost('https://docs.example.test', 'https://docs.example.test'));
+  assert.doesNotThrow(() => assertConfiguredHost(undefined, 'https://docs.example.test'));
+  assert.throws(
+    () => assertConfiguredHost('https://other.example', 'https://docs.example.test'),
+    /only sent to the configured host/
+  );
 });

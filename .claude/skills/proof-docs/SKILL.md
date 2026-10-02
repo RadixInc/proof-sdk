@@ -28,7 +28,7 @@ A thin, deterministic client for a deployed Proof instance's public agent HTTP c
    node <skill-dir>/scripts/proof-docs.mjs secrets list
    ```
    `doctor` checks, in order, the configured host, the edge login, `/agent-docs`, the stored document credential, and `/state`, and prints the fix for the first failing step. Documents created by this skill already have a stored credential; do not ask for a share link until `secrets list` and `doctor` show there is none.
-3. **If the user hands you a share link** (`https://<host>/d/<slug>?token=...`), run `link add <url>` once. It saves the token under the host and slug; after that, pass only the slug or URL.
+3. **If the user hands you a share link** (`https://<host>/d/<slug>?token=...`), run `link add <url>` once. It saves the token under the host and slug; after that, pass only the slug or URL. Credentials are only ever sent to the configured host: a link naming a different host is refused, not followed. If it really is the deployment you mean, run `config set --host <that origin>` first.
 4. A `401` from a document endpoint means the document credential, not the edge login, was missing or wrong. The script's error says which credential it sent (the `--token` flag, a URL token, a stored `accessToken`, or none) — read that line before trying anything else.
 
 ## Source of truth — read before calling anything

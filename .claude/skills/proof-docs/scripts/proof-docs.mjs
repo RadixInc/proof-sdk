@@ -235,6 +235,21 @@ function parseDocRef(input, defaultHost) {
   return { host: defaultHost, slug: input };
 }
 
+/**
+ * Credentials (edge service token, API key, document token) are only ever sent to the configured
+ * host. A URL naming a different host is refused rather than followed, so a pasted or injected
+ * link cannot redirect them to another server.
+ */
+function assertConfiguredHost(urlHost, configuredHost) {
+  if (!urlHost || !configuredHost) return;
+  if (new URL(urlHost).origin !== new URL(configuredHost).origin) {
+    throw new Error(
+      `The link points at ${urlHost}, but the configured host is ${configuredHost}. Credentials are only ` +
+      'sent to the configured host. If that link is the deployment you mean, run: config set --host ' + urlHost
+    );
+  }
+}
+
 function storedSecretsOrNull(host, slug) {
   const file = secretsFile(host, slug);
   return fs.existsSync(file) ? readJson(file) : null;
@@ -348,7 +363,8 @@ function parseHeaderFlag(flag) {
  */
 async function authedRequest(config, { method, reqPath, ref, flags, body, extraHeaders = {} }) {
   const parsed = ref ? parseDocRef(ref, config.host) : null;
-  const host = parsed?.host ?? requireHost(config);
+  const host = requireHost(config);
+  if (parsed) assertConfiguredHost(parsed.host, host);
   const slug = parsed?.slug ?? slugFromPath(reqPath);
   const { token, source } = chooseCredential({
     host,
@@ -411,8 +427,9 @@ async function cmdSecretsShow(positional) {
   const [input] = positional;
   if (!input) throw new Error('secrets show requires <slug-or-url>');
   const { host, slug } = parseDocRef(input, config.host);
-  const stored = chooseStored(host ?? requireHost(config), slug);
-  print({ ...redact(stored), secretsFile: secretsFile(host ?? config.host, slug) });
+  const useHost = host ?? requireHost(config);
+  const stored = chooseStored(useHost, slug);
+  print({ ...redact(stored), secretsFile: secretsFile(useHost, slug) });
 }
 
 function chooseStored(host, slug) {
@@ -523,8 +540,9 @@ async function cmdDoctor(positional, flags) {
   };
 
   const parsed = positional[0] ? parseDocRef(positional[0], config.host) : null;
-  const host = parsed?.host ?? config.host;
+  const host = config.host;
   if (!host) return step('host', false, 'none configured; run config set --host <url>');
+  if (parsed) assertConfiguredHost(parsed.host, host);
   step('host', true, host);
 
   let edgeHeaders = {};
@@ -641,6 +659,6 @@ async function main() {
   }
 }
 
-export { redact, slugFromPath, parseDocRef, chooseCredential, explainFailure, HttpError, buildHeaders };
+export { redact, slugFromPath, parseDocRef, assertConfiguredHost, chooseCredential, explainFailure, HttpError, buildHeaders };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();
