@@ -19,6 +19,18 @@ A thin, deterministic client for a deployed Proof instance's public agent HTTP c
 - **Node.js 20 or newer.** The script has no dependencies to install (only Node built-ins), but `call` relies on the global `crypto.randomUUID()` for idempotency keys, which needs Node's global Web Crypto API (stable from Node 20 on). On an older Node it fails with a bare `ReferenceError` — if you hit that, the fix is upgrading Node, not the script.
 - **`cloudflared`** — only for a non-local deployment (anything other than `localhost`/`127.0.0.1`) that isn't using a service token. Install it yourself (e.g. `brew install cloudflared`) and run `cloudflared access login <host>` once per deployment before your first request. The script will tell you if a request is missing edge credentials, but it can't install `cloudflared` for you or distinguish "not installed" from "not logged in" — if the suggested login command also fails, check whether `cloudflared` is on PATH at all.
 
+## Start here when a document is mentioned (slug or `/d/<slug>` URL)
+
+1. **Only this skill's script can read a Proof document.** A deployment's `/d/<slug>` URLs sit behind its own edge auth and per-document tokens. Never send one to a generic docs/artifact connector, a web fetch, or a browser scrape — those get an access denial that looks the same whether the document is missing or just not shared, and they lead you away from the real cause.
+2. **Check what credentials this machine already has before asking the user for anything:**
+   ```
+   node <skill-dir>/scripts/proof-docs.mjs doctor <slug-or-url>
+   node <skill-dir>/scripts/proof-docs.mjs secrets list
+   ```
+   `doctor` checks, in order, the configured host, the edge login, `/agent-docs`, the stored document credential, and `/state`, and prints the fix for the first failing step. Documents created by this skill already have a stored credential; do not ask for a share link until `secrets list` and `doctor` show there is none.
+3. **If the user hands you a share link** (`https://<host>/d/<slug>?token=...`), run `link add <url>` once. It saves the token under the host and slug; after that, pass only the slug or URL.
+4. A `401` from a document endpoint means the document credential, not the edge login, was missing or wrong. The script's error says which credential it sent (the `--token` flag, a URL token, a stored `accessToken`, or none) — read that line before trying anything else.
+
 ## Source of truth — read before calling anything
 
 Every deployment serves its own canonical, versioned reference. Prefer it over anything cached in this file or remembered from a prior session — it can't drift the way a static doc can:
@@ -53,8 +65,9 @@ For behavioral guidance (which ops to prefer, event etiquette), the deployment i
 - Always go through `scripts/proof-docs.mjs` for create/call — it persists full secrets to `~/.config/proof-docs/secrets/<host>/<slug>.json` (mode `600`) and only ever prints a **redacted** form (e.g. `8b5f...(64 chars, saved to disk)`) to its stdout.
 - **Never** manually copy a full secret value out of a raw HTTP response and paste it into the conversation — always let the script's redaction handle display.
 - The first time the script ever persists a secret on a machine, it prints a one-time warning to stderr about where the file lives and that the user owns its lifecycle. **Relay that warning to the user verbatim** when you see it — don't swallow it.
-- For follow-up operations on a document this skill created, pass `--slug <slug>` (and `--as owner` if the op needs owner-level rights) and let the script look up the stored credential. Don't ask the user to paste a secret back in.
-- If operating on a document created *outside* this skill (someone hands you a slug + token), pass `--token <token>` explicitly instead.
+- For follow-up operations on a document this skill created, the script finds the stored credential for you: the slug is read from the request path (`/documents/<slug>/...`, `/api/agent/<slug>/...`), or pass `--slug <slug-or-url>` (and `--as owner` if the op needs owner-level rights). Don't ask the user to paste a secret back in.
+- If operating on a document created *outside* this skill (someone hands you a share link), save it once with `link add <url>`, or pass `--token <token>` for a single call.
+- Display is redacted everywhere the script prints: `ownerSecret` and `accessToken` are truncated, and any `?token=` in a share link (`tokenUrl`, `tokenPath`) is masked. If you ever see a full token in script output, that is a bug in the script; do not repeat it in the conversation.
 
 Local persistence (over always printing in full) is deliberate: these credentials describe a remote deployment, not per-repo state, so they're keyed by host+slug under the user's home directory and survive across every project/worktree on that machine.
 
@@ -71,18 +84,35 @@ node <skill-dir>/scripts/proof-docs.mjs create \
 ```
 Prints the slug plus `shareUrl`/`tokenUrl` (redacted secrets). Give the user the `shareUrl` or `tokenUrl` — that's the real-time link they open in a browser to collaborate. This skill does not join that session itself.
 
-**Anything else in the contract** (read state, apply an op, poll/ack events) goes through the generic authenticated call:
+**Read a document without flooding the terminal** (large docs run to hundreds of KB):
+```
+node <skill-dir>/scripts/proof-docs.mjs read <slug-or-url> [--out <file>]
+```
+Prints the title, revision, size and a heading outline. With `--out <file>` it writes the full state to `<file>` and the markdown to `<file>.md`; read only the part you need from there.
+
+**Change one passage** (a targeted `rewrite.apply`; prefer this to replacing the whole document):
+```
+node <skill-dir>/scripts/proof-docs.mjs replace <slug-or-url> \
+  --find "<exact text>" --with "<new text>" [--find-file <path> --with-file <path>]
+```
+It reads the current revision, requires `--find` to match exactly once (quote markdown escapes such as `\*` as they appear), and posts the change against that revision. A `409 STALE_BASE` means the document moved: run it again. Use `--find-file`/`--with-file` for a multi-line change such as a table row.
+
+**Anything else in the contract** (apply other ops, poll/ack events) goes through the generic authenticated call:
 ```
 node <skill-dir>/scripts/proof-docs.mjs call <METHOD> <path> \
-  --slug <slug> [--as owner|link] [--body '<json>'] [--body-file <path>]
+  [--slug <slug-or-url>] [--as owner|link] [--body '<json>'] [--body-file <path>]
 ```
-Look up the exact `<path>` and body shape in `GET <host>/agent-docs` first. Examples of shape (verify against that live reference before relying on these):
-- Read state: `call GET /documents/<slug>/state --slug <slug>`
-- Add a comment: `call POST /documents/<slug>/ops --slug <slug> --body '{"type":"comment.add", ...}'`
-- Poll events: `call GET "/documents/<slug>/events/pending?after=0&limit=50" --slug <slug>`
-- Ack events: `call POST /documents/<slug>/events/ack --slug <slug> --body '{"ids":[...]}'`
+`--slug` is optional for document paths; the slug in the path selects the stored credential. Look up the exact `<path>` and body shape in `GET <host>/agent-docs` first. Examples of shape (verify against that live reference before relying on these):
+- Read state: `call GET /documents/<slug>/state`
+- Add a comment: `call POST /documents/<slug>/ops --body '{"type":"comment.add", ...}'`
+- Poll events: `call GET "/documents/<slug>/events/pending?after=0&limit=50"`
+- Ack events: `call POST /documents/<slug>/events/ack --body '{"ids":[...]}'`
 
-**Check what's stored for a document:**
+**Save a share link, check what's stored, diagnose a failure:**
 ```
-node <skill-dir>/scripts/proof-docs.mjs secrets show <slug>
+node <skill-dir>/scripts/proof-docs.mjs link add <share-url>
+node <skill-dir>/scripts/proof-docs.mjs secrets list
+node <skill-dir>/scripts/proof-docs.mjs secrets show <slug-or-url>
+node <skill-dir>/scripts/proof-docs.mjs doctor [<slug-or-url>]
 ```
+`secrets list` shows the documents this machine has credentials for (never the secret values). `doctor` prints an ok/FAIL line per layer — edge login, `/agent-docs`, stored credential, `/state` — so a failure points at the layer that broke.
